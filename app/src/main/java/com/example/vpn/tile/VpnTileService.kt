@@ -1,5 +1,6 @@
 package com.example.vpn.tile
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -55,7 +56,7 @@ class VpnTileService : TileService() {
                 val intent = Intent(this, MainActivity::class.java).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
-                startActivityAndCollapse(intent)
+                launchAppActivity(intent)
             } else {
                 serviceScope.launch(Dispatchers.IO) {
                     val db = AppDatabase.getInstance(applicationContext)
@@ -75,10 +76,30 @@ class VpnTileService : TileService() {
                         val intent = Intent(this@VpnTileService, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
-                        startActivityAndCollapse(intent)
+                        launchAppActivity(intent)
                     }
                 }
             }
+        }
+    }
+
+    private fun launchAppActivity(intent: Intent) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val pendingIntent = PendingIntent.getActivity(
+                    this,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                startActivityAndCollapse(pendingIntent)
+            } else {
+                @Suppress("DEPRECATION")
+                startActivityAndCollapse(intent)
+            }
+        } catch (_: Exception) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
         }
     }
 
