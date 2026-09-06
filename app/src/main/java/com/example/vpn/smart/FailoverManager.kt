@@ -1,0 +1,226 @@
+package com.example.vpn.smart
+
+import com.example.core.SecretRedactor
+import com.example.data.model.AppSettings
+import com.example.data.model.OperationalMode
+import com.example.data.model.VlessProfile
+import com.example.data.repository.ServerRepository
+import com.example.vpn.godmode.MaximusMeshManager
+import com.example.vpn.godmode.PsiphonConduitBridge
+import com.example.xray.XrayLogManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.net.InetSocketAddress
+import java.net.Socket
+
+/**
+ * GOD MODE: Resilient 4-Tier Emergency Cascade & Auto-Failover Watchdog.
+ *
+ * Ordered Failover Ladder:
+ * 1. Tier 1: Primary Reality / Hysteria2 endpoints (lowest latency, high score)
+ * 2. Tier 2: Secondary Reality / VLESS backup nodes
+ * 3. Tier 3: Verified Psiphon / Conduit volunteer proxy bridges
+ * 4. Tier 4: Local Maximus P2P Mesh relays (WiFi / hotspot offline relay)
+ *
+ * Features continuous bidirectional health monitoring (escalates on severe censorship,
+ * de-escalates back to Tier 1 when primary network connectivity recovers).
+ */
+class FailoverManager(
+    private val serverRepository: ServerRepository,
+    private val protectSocket: ((Socket) -> Boolean)? = null,
+    private val onTriggerSwitch: (VlessProfile, String) -> Unit
+) {
+    enum class CascadeTier(val stageNumber: Int, val title: String, val badge: String) {
+        TIER_1_PRIMARY_REALITY(1, "Tier 1: Primary Reality / Hysteria2", "TIER 1 - PRIMARY"),
+        TIER_2_SECONDARY_NODES(2, "Tier 2: Backup Reality Nodes", "TIER 2 - BACKUP"),
+        TIER_3_VOLUNTEER_BRIDGES(3, "Tier 3: Psiphon / Conduit Bridges", "TIER 3 - BRIDGES"),
+        TIER_4_LOCAL_MESH(4, "Tier 4: Maximus P2P Mesh Relays", "TIER 4 - P2P MESH"),
+        DEGRADED_OFFLINE(5, "Degraded: Outlets Severed", "DEGRADED")
+    }
+
+    private val scope = CoroutineScope(Dispatchers.IO)
+    private var monitorJob: Job? = null
+    private var recoveryProbeJob: Job? = null
+
+    private val _currentTier = MutableStateFlow(CascadeTier.TIER_1_PRIMARY_REALITY)
+    val currentTier: StateFlow<CascadeTier> = _currentTier.asStateFlow()
+
+    private val _failoverEvents = MutableStateFlow<String?>(null)
+    val failoverEvents: StateFlow<String?> = _failoverEvents.asStateFlow()
+
+    private var consecutiveFailures = 0
+    private var lastSwitchTimestamp = 0L
+
+    fun startMonitoring(currentProfile: VlessProfile, settings: AppSettings) {
+        stopMonitoring()
+        if (!settings.autoFailoverEnabled) return
+
+        _currentTier.value = determineInitialTier(currentProfile)
+        consecutiveFailures = 0
+
+        monitorJob = scope.launch {
+            val safeName = SecretRedactor.redact(currentProfile.name)
+            XrayLogManager.i("FAILOVER", "Failover watchdog active for '$safeName' [Mode: ${settings.operationalMode.displayName}, Tier: ${_currentTier.value.badge}].")
+
+            while (isActive) {
+                delay(12000) // Check health every 12 seconds
+
+                val isHealthy = checkHealth(currentProfile, settings.failoverThresholdMs)
+                if (!isHealthy) {
+                    consecutiveFailures++
+                    XrayLogManager.w("FAILOVER", "Node $safeName health check failed ($consecutiveFailures/3).")
+
+                    // Require 3 consecutive failures to avoid flapping
+                    if (consecutiveFailures >= 3) {
+                        val now = System.currentTimeMillis()
+                        // 25-second cooldown between failovers
+                        if (now - lastSwitchTimestamp > 25000) {
+                            lastSwitchTimestamp = now
+                            attemptFailover(currentProfile, settings)
+                        }
+                    }
+                } else {
+                    consecutiveFailures = 0
+                }
+            }
+        }
+
+        // In GOD MODE: If running on emergency bridge or mesh (Tier 3/4), start background recovery probe
+        if (settings.operationalMode == OperationalMode.GOD_MODE) {
+            startRecoveryWatchdog(settings)
+        }
+    }
+
+    fun stopMonitoring() {
+        monitorJob?.cancel()
+        monitorJob = null
+        recoveryProbeJob?.cancel()
+        recoveryProbeJob = null
+        consecutiveFailures = 0
+    }
+
+    private fun determineInitialTier(profile: VlessProfile): CascadeTier {
+        return when {
+            profile.id.startsWith("mesh-") -> CascadeTier.TIER_4_LOCAL_MESH
+            profile.id.startsWith("bridge-") -> CascadeTier.TIER_3_VOLUNTEER_BRIDGES
+            profile.overallScore >= 75.0 -> CascadeTier.TIER_1_PRIMARY_REALITY
+            else -> CascadeTier.TIER_2_SECONDARY_NODES
+        }
+    }
+
+    private suspend fun checkHealth(profile: VlessProfile, latencyThreshold: Long): Boolean {
+        return try {
+            val socket = Socket()
+            try { protectSocket?.invoke(socket) } catch (_: Exception) {}
+            val start = System.currentTimeMillis()
+            socket.connect(InetSocketAddress(profile.address, profile.port), 3000)
+            val elapsed = System.currentTimeMillis() - start
+            socket.close()
+            elapsed < latencyThreshold
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Periodically probes Tier 1 primary servers when running in emergency fallback mode,
+     * enabling automatic de-escalation once upstream internet filtering ceases.
+     */
+    private fun startRecoveryWatchdog(settings: AppSettings) {
+        recoveryProbeJob?.cancel()
+        recoveryProbeJob = scope.launch {
+            while (isActive) {
+                delay(30000) // Check primary recovery every 30s
+                if (_currentTier.value == CascadeTier.TIER_3_VOLUNTEER_BRIDGES || _currentTier.value == CascadeTier.TIER_4_LOCAL_MESH) {
+                    try {
+                        val profiles = serverRepository.allProfiles.first()
+                        val topPrimary = profiles.filter { !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") }
+                            .maxByOrNull { it.overallScore }
+
+                        if (topPrimary != null && checkHealth(topPrimary, 450L)) {
+                            val reason = "GOD Mode Recovery: Primary network connectivity restored! De-escalating to Tier 1 (${topPrimary.name})."
+                            _currentTier.value = CascadeTier.TIER_1_PRIMARY_REALITY
+                            _failoverEvents.value = reason
+                            XrayLogManager.i("GOD_MODE", reason)
+                            onTriggerSwitch(topPrimary, reason)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    private suspend fun attemptFailover(degradedProfile: VlessProfile, settings: AppSettings) {
+        val allProfiles = try {
+            serverRepository.allProfiles.first()
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        val safeDegraded = SecretRedactor.redact(degradedProfile.name)
+
+        // --- GOD MODE CASCADE LADDER ---
+        if (settings.operationalMode == OperationalMode.GOD_MODE) {
+            XrayLogManager.w("GOD_MODE", "GOD Mode Cascade engaged due to outage on $safeDegraded!")
+
+            // Step 1: Secondary Reality / VLESS nodes
+            val candidateProfiles = allProfiles.filter { it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && it.overallScore > 0 }
+            val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile)
+
+            if (bestFallback != null && bestFallback.overallScore >= 40.0) {
+                _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
+                val reason = "GOD Mode Cascade [Tier 2]: Switched to backup node ${bestFallback.profile.name}"
+                _failoverEvents.value = reason
+                XrayLogManager.i("GOD_MODE", reason)
+                onTriggerSwitch(bestFallback.profile, reason)
+                return
+            }
+
+            // Step 2: Psiphon / Conduit volunteer bridges (Tier 3)
+            val bestBridge = PsiphonConduitBridge.getBestActiveBridge()
+            if (bestBridge != null && bestBridge.isVerified) {
+                _currentTier.value = CascadeTier.TIER_3_VOLUNTEER_BRIDGES
+                val bridgeProfile = PsiphonConduitBridge.asVlessProfile(bestBridge)
+                val reason = "GOD Mode Cascade [Tier 3]: Switched to Psiphon/Conduit Bridge (${bestBridge.region})"
+                _failoverEvents.value = reason
+                XrayLogManager.i("GOD_MODE", reason)
+                onTriggerSwitch(bridgeProfile, reason)
+                return
+            }
+
+            // Step 3: Local P2P Mesh relay (Tier 4)
+            val bestPeer = MaximusMeshManager.getBestRelayPeer()
+            if (bestPeer != null) {
+                _currentTier.value = CascadeTier.TIER_4_LOCAL_MESH
+                val meshProfile = MaximusMeshManager.asVlessProfile(bestPeer)
+                val reason = "GOD Mode Cascade [Tier 4]: Switched to Local Maximus Mesh Relay (${bestPeer.peerId})"
+                _failoverEvents.value = reason
+                XrayLogManager.i("GOD_MODE", reason)
+                onTriggerSwitch(meshProfile, reason)
+                return
+            }
+
+            _currentTier.value = CascadeTier.DEGRADED_OFFLINE
+            XrayLogManager.e("GOD_MODE", "All cascade tiers exhausted for $safeDegraded. Operating in offline mesh beacon mode.")
+        }
+
+        // Standard Daily Mode fallback
+        val candidates = allProfiles.filter { it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && it.overallScore > 0 }
+        val fallback = SmartConnect.selectBestNode(candidates, settings.scoringProfile)
+
+        if (fallback != null) {
+            val reason = "Failover: Latency threshold exceeded on $safeDegraded. Switched to ${fallback.profile.name} (Score: ${fallback.overallScore})."
+            _failoverEvents.value = reason
+            XrayLogManager.i("FAILOVER", reason)
+            onTriggerSwitch(fallback.profile, reason)
+        }
+    }
+}
