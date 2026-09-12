@@ -57,7 +57,7 @@ object ServerTester {
             val tcpLatency = System.currentTimeMillis() - startTime
 
             // Stage 3: TLS / Handshake Test if configured
-            val finalLatency = if (profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)) {
+            val sslLatency = if (profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)) {
                 val isReality = profile.security.equals("reality", ignoreCase = true)
                 val sslContext = if (isReality) {
                     val realityTrustManager = object : javax.net.ssl.X509TrustManager {
@@ -100,6 +100,38 @@ object ServerTester {
                 tcpLatency
             }
 
+            // Stage 4: WebSocket Handshake Validation if transport is WS
+            val finalLatency = if (profile.transport.equals("ws", ignoreCase = true)) {
+                val activeSocket = sslSocket ?: socket
+                val outStream = activeSocket.getOutputStream()
+                val inStream = activeSocket.getInputStream()
+
+                val wsHost = if (profile.host.isNotBlank()) profile.host else profile.sni.ifBlank { profile.address }
+                val wsPath = if (profile.path.isNotBlank()) {
+                    if (profile.path.startsWith("/")) profile.path else "/${profile.path}"
+                } else "/"
+                val randomBytes = ByteArray(16).apply { java.security.SecureRandom().nextBytes(this) }
+                val wsKey = java.util.Base64.getEncoder().encodeToString(randomBytes)
+
+                val wsHandshake = "GET $wsPath HTTP/1.1\r\n" +
+                        "Host: $wsHost\r\n" +
+                        "Upgrade: websocket\r\n" +
+                        "Connection: Upgrade\r\n" +
+                        "Sec-WebSocket-Key: $wsKey\r\n" +
+                        "Sec-WebSocket-Version: 13\r\n" +
+                        "User-Agent: Mozilla/5.0 (Android; Maximus)\r\n\r\n"
+                outStream.write(wsHandshake.toByteArray(Charsets.UTF_8))
+                outStream.flush()
+
+                val responseLine = readHttpLine(inStream)
+                if (!responseLine.contains("101")) {
+                    throw IllegalStateException("WebSocket handshake rejected: $responseLine")
+                }
+                System.currentTimeMillis() - startTime
+            } else {
+                sslLatency
+            }
+
             val status = if (finalLatency < 350) {
                 ServerTestStatus.Available(finalLatency)
             } else {
@@ -134,5 +166,19 @@ object ServerTester {
             try { sslSocket?.close() } catch (_: Exception) {}
             try { socket?.close() } catch (_: Exception) {}
         }
+    }
+
+    private fun readHttpLine(inStream: java.io.InputStream): String {
+        val sb = StringBuilder()
+        while (true) {
+            val b = inStream.read()
+            if (b == -1) break
+            if (b == '\n'.code) break
+            if (b != '\r'.code) {
+                sb.append(b.toChar())
+            }
+            if (sb.length > 512) break
+        }
+        return sb.toString().trim()
     }
 }

@@ -42,7 +42,8 @@ class UdpRelay(
     private val protectSocket: (Socket) -> Boolean,
     private val protectDatagram: (DatagramSocket) -> Boolean,
     private val sendToTun: (ByteArray) -> Unit,
-    private val onTraffic: (sent: Long, received: Long) -> Unit
+    private val onTraffic: (sent: Long, received: Long) -> Unit,
+    private val onTunnelError: ((String) -> Unit)? = null
 ) {
 
     companion object {
@@ -357,7 +358,9 @@ class UdpRelay(
 
             startProxiedUdpPumping(session, isWs)
         } catch (e: Exception) {
-            XrayLogManager.appendLog("Proxied UDP tunnel setup failed for $destIpStr:$destPort: ${e.message}", "UDP")
+            val errMsg = e.message ?: "UDP tunnel error"
+            XrayLogManager.appendLog("Proxied UDP tunnel setup failed for $destIpStr:$destPort: $errMsg", "UDP")
+            onTunnelError?.invoke(errMsg)
             sessions.remove(session.key)
             session.close()
         }

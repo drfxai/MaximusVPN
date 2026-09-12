@@ -72,46 +72,19 @@ class RayApplication : Application() {
         // Database initialization ready for user configuration imports
         XrayLogManager.i("APP", "Application environment initialized successfully.")
 
-        // Seed default fallback nodes if database is empty
+        // Clean up legacy non-functional seed nodes and initialize profile state
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (serverRepository.getCount() == 0) {
-                    val defaultSeedProfiles = listOf(
-                        com.example.data.model.VlessProfile(
-                            id = "seed-vless-reality-1",
-                            name = "⚡ Global Anti-Censorship Edge",
-                            address = "1.1.1.1",
-                            port = 443,
-                            uuid = "a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
-                            security = "reality",
-                            sni = "www.microsoft.com",
-                            publicKey = "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
-                            fingerprint = "chrome",
-                            category = com.example.data.model.ServerCategory.ELITE,
-                            countryCode = "US"
-                        ),
-                        com.example.data.model.VlessProfile(
-                            id = "seed-vless-ws-2",
-                            name = "🛡️ Cloudflare Stealth Tunnel",
-                            address = "104.16.132.229",
-                            port = 443,
-                            uuid = "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
-                            transport = "ws",
-                            security = "tls",
-                            sni = "cloudflare.com",
-                            host = "cloudflare.com",
-                            path = "/vless-ws",
-                            fingerprint = "chrome",
-                            category = com.example.data.model.ServerCategory.FAST,
-                            countryCode = "EU"
-                        )
-                    )
-                    serverRepository.insertAllWithDeduplication(defaultSeedProfiles)
-                    settingsRepository.setSelectedProfileId("seed-vless-reality-1")
-                    XrayLogManager.i("APP", "Default fallback VPN nodes seeded successfully.")
+                serverRepository.delete("seed-vless-ws-1")
+                serverRepository.delete("seed-vless-reality-1")
+
+                val currentSelected = settingsRepository.getSettings().selectedProfileId
+                if (currentSelected == "seed-vless-ws-1" || currentSelected == "seed-vless-reality-1") {
+                    val firstValid = serverRepository.getAllProfilesOnce().firstOrNull()
+                    settingsRepository.setSelectedProfileId(firstValid?.id)
                 }
             } catch (e: Exception) {
-                XrayLogManager.e("APP", "Failed to seed default VPN nodes: ${e.message}")
+                XrayLogManager.w("APP", "Profile startup cleanup notice: ${e.message}")
             }
         }
     }

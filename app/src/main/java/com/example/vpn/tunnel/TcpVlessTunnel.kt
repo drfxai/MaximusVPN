@@ -40,7 +40,8 @@ class TcpVlessTunnel(
     private val settings: AppSettings,
     private val protectSocket: (Socket) -> Boolean,
     private val sendToTun: (ByteArray) -> Unit,
-    private val onTraffic: (sent: Long, received: Long) -> Unit
+    private val onTraffic: (sent: Long, received: Long) -> Unit,
+    private val onTunnelError: ((String) -> Unit)? = null
 ) {
 
     companion object {
@@ -386,7 +387,9 @@ class TcpVlessTunnel(
 
             startPumping(session)
         } catch (e: Exception) {
-            XrayLogManager.appendLog("TCP tunnel error for $destIpStr:$destPort: ${e.message}", "TCP")
+            val errMsg = e.message ?: "TCP tunnel error"
+            XrayLogManager.appendLog("TCP tunnel error for $destIpStr:$destPort: $errMsg", "TCP")
+            onTunnelError?.invoke(errMsg)
             val rstPacket = PacketBuilder.buildTcpPacket(
                 srcIp = session.serverIp,
                 dstIp = session.clientIp,

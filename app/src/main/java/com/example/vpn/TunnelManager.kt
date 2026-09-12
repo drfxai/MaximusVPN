@@ -34,7 +34,8 @@ class TunnelManager(
     private val protectSocket: (Socket) -> Boolean,
     private val protectDatagram: (DatagramSocket) -> Boolean,
     private val onTraffic: (sent: Long, received: Long) -> Unit,
-    private val onFatalTunnelFailure: (Throwable) -> Unit
+    private val onFatalTunnelFailure: (Throwable) -> Unit,
+    private val onTunnelError: ((String) -> Unit)? = null
 ) {
 
     private val isRunning = AtomicBoolean(false)
@@ -108,7 +109,8 @@ class TunnelManager(
             settings = settings,
             protectSocket = protectSocket,
             sendToTun = sendToTunFunc,
-            onTraffic = onTraffic
+            onTraffic = onTraffic,
+            onTunnelError = onTunnelError
         )
 
         udpRelay = UdpRelay(
@@ -118,7 +120,8 @@ class TunnelManager(
             protectSocket = protectSocket,
             protectDatagram = protectDatagram,
             sendToTun = sendToTunFunc,
-            onTraffic = onTraffic
+            onTraffic = onTraffic,
+            onTunnelError = onTunnelError
         )
 
         XrayLogManager.appendLog("TUN transparent router active: DNS, ICMP, and TCP/UDP VLESS bridges initialized.", "TUNNEL")

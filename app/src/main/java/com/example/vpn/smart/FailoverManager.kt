@@ -3,6 +3,7 @@ package com.example.vpn.smart
 import com.example.core.SecretRedactor
 import com.example.data.model.AppSettings
 import com.example.data.model.OperationalMode
+import com.example.data.model.ServerTestStatus
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
 import com.example.vpn.godmode.MaximusMeshManager
@@ -58,11 +59,15 @@ class FailoverManager(
 
     private var consecutiveFailures = 0
     private var lastSwitchTimestamp = 0L
+    private var currentActiveProfile: VlessProfile? = null
+    private var currentActiveSettings: AppSettings? = null
 
     fun startMonitoring(currentProfile: VlessProfile, settings: AppSettings) {
         stopMonitoring()
         if (!settings.autoFailoverEnabled) return
 
+        currentActiveProfile = currentProfile
+        currentActiveSettings = settings
         _currentTier.value = determineInitialTier(currentProfile)
         consecutiveFailures = 0
 
@@ -99,12 +104,38 @@ class FailoverManager(
         }
     }
 
+    /**
+     * Reports runtime connection or handshake failures (e.g. WebSocket 301/404, TLS drop)
+     * detected by active tunnel packet streaming.
+     */
+    fun reportTunnelError(reason: String) {
+        val profile = currentActiveProfile ?: return
+        val settings = currentActiveSettings ?: return
+        if (monitorJob?.isActive != true) return
+
+        consecutiveFailures++
+        val safeName = SecretRedactor.redact(profile.name)
+        XrayLogManager.w("FAILOVER", "Active tunnel error reported on '$safeName' ($consecutiveFailures/3): $reason")
+
+        if (consecutiveFailures >= 3) {
+            val now = System.currentTimeMillis()
+            if (now - lastSwitchTimestamp > 20000) {
+                lastSwitchTimestamp = now
+                scope.launch {
+                    attemptFailover(profile, settings)
+                }
+            }
+        }
+    }
+
     fun stopMonitoring() {
         monitorJob?.cancel()
         monitorJob = null
         recoveryProbeJob?.cancel()
         recoveryProbeJob = null
         consecutiveFailures = 0
+        currentActiveProfile = null
+        currentActiveSettings = null
     }
 
     private fun determineInitialTier(profile: VlessProfile): CascadeTier {
@@ -117,16 +148,15 @@ class FailoverManager(
     }
 
     private suspend fun checkHealth(profile: VlessProfile, latencyThreshold: Long): Boolean {
-        return try {
-            val socket = Socket()
-            try { protectSocket?.invoke(socket) } catch (_: Exception) {}
-            val start = System.currentTimeMillis()
-            socket.connect(InetSocketAddress(profile.address, profile.port), 3000)
-            val elapsed = System.currentTimeMillis() - start
-            socket.close()
-            elapsed < latencyThreshold
-        } catch (_: Exception) {
-            false
+        val result = com.example.vpn.ServerTester.testServer(
+            profile = profile,
+            timeoutMs = 3000,
+            protectSocket = protectSocket
+        )
+        return when (val status = result.status) {
+            is ServerTestStatus.Available -> status.latencyMs < latencyThreshold
+            is ServerTestStatus.Slow -> status.latencyMs < latencyThreshold
+            else -> false
         }
     }
 
@@ -167,15 +197,21 @@ class FailoverManager(
 
         val safeDegraded = SecretRedactor.redact(degradedProfile.name)
 
+        // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
+        val nonDegraded = allProfiles.filter {
+            it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
+        }
+        val scoredCandidates = nonDegraded.filter { it.overallScore > 0 }
+        val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else nonDegraded
+
         // --- GOD MODE CASCADE LADDER ---
         if (settings.operationalMode == OperationalMode.GOD_MODE) {
             XrayLogManager.w("GOD_MODE", "GOD Mode Cascade engaged due to outage on $safeDegraded!")
 
             // Step 1: Secondary Reality / VLESS nodes
-            val candidateProfiles = allProfiles.filter { it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && it.overallScore > 0 }
             val bestFallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile)
 
-            if (bestFallback != null && bestFallback.overallScore >= 40.0) {
+            if (bestFallback != null) {
                 _currentTier.value = CascadeTier.TIER_2_SECONDARY_NODES
                 val reason = "GOD Mode Cascade [Tier 2]: Switched to backup node ${bestFallback.profile.name}"
                 _failoverEvents.value = reason
@@ -213,11 +249,21 @@ class FailoverManager(
         }
 
         // Standard Daily Mode fallback
-        val candidates = allProfiles.filter { it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-") && it.overallScore > 0 }
-        val fallback = SmartConnect.selectBestNode(candidates, settings.scoringProfile)
+        val fallback = SmartConnect.selectBestNode(candidateProfiles, settings.scoringProfile)
+            ?: candidateProfiles.firstOrNull()?.let {
+                SmartConnect.SmartSelection(
+                    profile = it,
+                    reasonPing = "Fallback",
+                    reasonDownload = "Standard",
+                    reasonStability = "Normal",
+                    reasonPacketLoss = "0%",
+                    overallScore = it.overallScore,
+                    description = "Fallback to ${it.name}"
+                )
+            }
 
         if (fallback != null) {
-            val reason = "Failover: Latency threshold exceeded on $safeDegraded. Switched to ${fallback.profile.name} (Score: ${fallback.overallScore})."
+            val reason = "Failover: Outage detected on $safeDegraded. Switched to ${fallback.profile.name}."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
             onTriggerSwitch(fallback.profile, reason)

@@ -31,11 +31,12 @@ object SmartConnect {
 
         val pool = if (healthyProfiles.isNotEmpty()) healthyProfiles else profiles
 
-        // Sort by overallScore desc, then by latency asc
+        // Sort: Favorite bonus, then overallScore desc, stability desc, latency asc (lower is better)
         val best = pool.maxWithOrNull(
-            compareBy<VlessProfile> { it.overallScore }
-                .thenByDescending { it.stability }
-                .thenBy { it.lastLatencyMs ?: 9999L }
+            compareBy<VlessProfile> { if (it.isFavorite) 1 else 0 }
+                .thenBy { it.overallScore }
+                .thenBy { it.stability }
+                .thenBy { -(it.lastLatencyMs ?: 9999L) }
         ) ?: return null
 
         val pingStr = if (best.lastLatencyMs != null && best.lastLatencyMs > 0) "${best.lastLatencyMs} ms" else "Fast"

@@ -418,6 +418,9 @@ class RayVpnService : VpnService() {
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
+                },
+                onTunnelError = { reason ->
+                    failoverManager?.reportTunnelError(reason)
                 }
             )
             tunnelManager?.start()
