@@ -5,6 +5,7 @@ import com.example.data.model.ProtocolType
 import com.example.mihomo.MihomoParser
 import com.example.vpn.dns.DoHClient
 import com.example.vpn.engine.ConfigurationAdapter
+import com.example.vpn.engine.UniversalImportEngine
 import com.example.xray.XrayConfigParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -192,6 +193,48 @@ class MihomoAndUniversalAdapterTest {
         assertEquals(1, trojanProfiles.size)
         assertEquals(ProtocolType.TROJAN, trojanProfiles.first().protocolType)
         assertEquals("trojan.vpn.com", trojanProfiles.first().address)
+
+        // 4. Robust parsing with emojis and special characters in fragments
+        val trojanWithEmoji = "trojan://pass123@1.2.3.4:443?security=tls#🚀 Tokyo | Server #1"
+        val parsedTrojanEmoji = ConfigurationAdapter.parseTrojanUri(trojanWithEmoji)
+        assertNotNull(parsedTrojanEmoji)
+        assertEquals("1.2.3.4", parsedTrojanEmoji!!.address)
+        assertEquals(443, parsedTrojanEmoji.port)
+        assertEquals("pass123", parsedTrojanEmoji.uuid)
+        assertEquals("🚀 Tokyo | Server #1", parsedTrojanEmoji.name)
+
+        val hy2WithEmoji = "hy2://mypassword@5.6.7.8:8443?sni=fast.net&alpn=h3#⚡ Hysteria Node"
+        val parsedHy2Emoji = ConfigurationAdapter.parseHysteria2Uri(hy2WithEmoji)
+        assertNotNull(parsedHy2Emoji)
+        assertEquals("5.6.7.8", parsedHy2Emoji!!.address)
+        assertEquals(8443, parsedHy2Emoji.port)
+        assertEquals("mypassword", parsedHy2Emoji.uuid)
+        assertEquals("⚡ Hysteria Node", parsedHy2Emoji.name)
+        assertEquals(EngineType.MIHOMO, parsedHy2Emoji.engineType)
+
+        // 5. UniversalImportEngine with SOCKS5, HTTP, and TUIC
+        val socksItem = UniversalImportEngine.parseSocks5Uri("socks5://user:pass@127.0.0.1:1080#Local Socks5")
+        assertTrue(socksItem is UniversalImportEngine.ParsedItem.Success)
+
+        val httpItem = UniversalImportEngine.parseHttpProxyUri("http://proxy.corp.com:8080#Corporate Proxy")
+        assertTrue(httpItem is UniversalImportEngine.ParsedItem.Success)
+    }
+
+    @Test
+    fun testVlessHeaderIPv6BracketHandling() {
+        val uuid = java.util.UUID.randomUUID().toString()
+        val uuidBytes = com.example.vless.VlessHeader.uuidToBytes(uuid)
+        // With brackets
+        val headerWithBrackets = com.example.vless.VlessHeader.encodeRequest(
+            uuidBytes = uuidBytes,
+            command = com.example.vless.VlessHeader.COMMAND_TCP,
+            destPort = 443,
+            destAddress = "[2001:db8::1]"
+        )
+        assertNotNull(headerWithBrackets)
+        assertTrue(headerWithBrackets.isNotEmpty())
+        // ATYPE_IPV6 is at index: 1 (ver) + 16 (uuid) + 1 (addonLen) + 1 (command) + 2 (port) = 21
+        assertEquals(com.example.vless.VlessHeader.ATYPE_IPV6.toInt(), headerWithBrackets[21].toInt() and 0xFF)
     }
 
     @Test

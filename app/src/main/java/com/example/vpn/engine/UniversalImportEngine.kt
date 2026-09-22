@@ -267,19 +267,73 @@ object UniversalImportEngine {
         }
     }
 
+    private data class ParsedUriComponents(
+        val scheme: String,
+        val userInfo: String,
+        val host: String,
+        val port: Int,
+        val query: String,
+        val fragment: String
+    )
+
+    private fun extractUriComponents(uriString: String, vararg validSchemes: String): ParsedUriComponents? {
+        val trimmed = uriString.trim()
+        val schemeSep = trimmed.indexOf("://")
+        if (schemeSep == -1) return null
+        val scheme = trimmed.substring(0, schemeSep).lowercase()
+        if (validSchemes.isNotEmpty() && !validSchemes.any { it.equals(scheme, ignoreCase = true) }) {
+            return null
+        }
+        val withoutScheme = trimmed.substring(schemeSep + 3)
+
+        val fragmentIdx = withoutScheme.indexOf('#')
+        val beforeFragment = if (fragmentIdx != -1) withoutScheme.substring(0, fragmentIdx) else withoutScheme
+        val fragment = if (fragmentIdx != -1) withoutScheme.substring(fragmentIdx + 1) else ""
+
+        val queryIdx = beforeFragment.indexOf('?')
+        val mainPart = if (queryIdx != -1) beforeFragment.substring(0, queryIdx) else beforeFragment
+        val queryString = if (queryIdx != -1) beforeFragment.substring(queryIdx + 1) else ""
+
+        val atIdx = mainPart.indexOf('@')
+        val userInfo = if (atIdx != -1) mainPart.substring(0, atIdx) else ""
+        val hostPort = if (atIdx != -1) mainPart.substring(atIdx + 1) else mainPart
+
+        val host: String
+        val port: Int
+        if (hostPort.startsWith("[")) {
+            val closing = hostPort.indexOf(']')
+            if (closing == -1) return null
+            host = hostPort.substring(1, closing)
+            val after = hostPort.substring(closing + 1)
+            val colon = after.indexOf(':')
+            port = if (colon != -1) after.substring(colon + 1).toIntOrNull() ?: -1 else -1
+        } else {
+            val colon = hostPort.lastIndexOf(':')
+            if (colon != -1) {
+                host = hostPort.substring(0, colon)
+                port = hostPort.substring(colon + 1).toIntOrNull() ?: -1
+            } else {
+                host = hostPort
+                port = -1
+            }
+        }
+        return ParsedUriComponents(scheme, userInfo, host, port, queryString, fragment)
+    }
+
     fun parseTrojanUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
         return try {
-            val uri = URI(uriString)
-            val password = uri.userInfo ?: ""
-            if (password.isBlank() || uri.host.isNullOrBlank()) {
+            val comp = extractUriComponents(uriString, "trojan")
+                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed Trojan URI structure")
+            val password = comp.userInfo
+            if (password.isBlank() || comp.host.isBlank()) {
                 return ParsedItem.Invalid(uriString.take(60), "Trojan link missing password or host")
             }
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
-            } else "Trojan-${uri.host}"
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
+            } else "Trojan-${comp.host}"
 
-            val params = parseQueryParams(uri.rawQuery)
-            val sni = params["sni"] ?: params["peer"] ?: uri.host ?: ""
+            val params = parseQueryParams(comp.query)
+            val sni = params["sni"] ?: params["peer"] ?: comp.host
             val transport = params["type"] ?: "tcp"
             val security = params["security"] ?: "tls"
             val path = params["path"] ?: ""
@@ -288,8 +342,8 @@ object UniversalImportEngine {
             val profile = VlessProfile(
                 id = UUID.randomUUID().toString(),
                 name = name,
-                address = uri.host,
-                port = if (uri.port > 0) uri.port else 443,
+                address = comp.host,
+                port = if (comp.port in 1..65535) comp.port else 443,
                 uuid = password,
                 encryption = "none",
                 transport = transport,
@@ -308,6 +362,28 @@ object UniversalImportEngine {
             ParsedItem.Success(profile)
         } catch (e: Exception) {
             ParsedItem.Invalid(uriString.take(60), "Malformed Trojan link: ${e.message}")
+        }
+    }
+
+    private fun parseHostPort(rawHostPort: String, defaultPort: Int = 8388): Pair<String, Int> {
+        val trimmed = rawHostPort.trim()
+        if (trimmed.startsWith("[")) {
+            val closing = trimmed.indexOf(']')
+            if (closing != -1) {
+                val host = trimmed.substring(1, closing)
+                val after = trimmed.substring(closing + 1)
+                val colon = after.indexOf(':')
+                val port = if (colon != -1) after.substring(colon + 1).toIntOrNull() ?: defaultPort else defaultPort
+                return Pair(host, port)
+            }
+        }
+        val colon = trimmed.lastIndexOf(':')
+        return if (colon != -1) {
+            val host = trimmed.substring(0, colon)
+            val port = trimmed.substring(colon + 1).toIntOrNull() ?: defaultPort
+            Pair(host, port)
+        } else {
+            Pair(trimmed, defaultPort)
         }
     }
 
@@ -338,9 +414,9 @@ object UniversalImportEngine {
                 password = if (uParts.size > 1) uParts[1] else ""
 
                 val hostPort = userAndServer[1].substringBefore("?")
-                val hpParts = hostPort.split(":", limit = 2)
-                host = hpParts[0]
-                port = if (hpParts.size > 1) hpParts[1].toIntOrNull() ?: 8388 else 8388
+                val (parsedHost, parsedPort) = parseHostPort(hostPort, 8388)
+                host = parsedHost
+                port = parsedPort
             } else {
                 val decoded = decodeBase64Safe(mainPart)
                     ?: return ParsedItem.Invalid(uriString.take(60), "Invalid Shadowsocks Base64 encoding")
@@ -349,9 +425,9 @@ object UniversalImportEngine {
                     val uParts = decoded.substring(0, atIdx).split(":", limit = 2)
                     method = uParts[0]
                     password = if (uParts.size > 1) uParts[1] else ""
-                    val hpParts = decoded.substring(atIdx + 1).split(":", limit = 2)
-                    host = hpParts[0]
-                    port = if (hpParts.size > 1) hpParts[1].toIntOrNull() ?: 8388 else 8388
+                    val (parsedHost, parsedPort) = parseHostPort(decoded.substring(atIdx + 1), 8388)
+                    host = parsedHost
+                    port = parsedPort
                 } else {
                     return ParsedItem.Invalid(uriString.take(60), "Malformed Shadowsocks payload")
                 }
@@ -385,24 +461,25 @@ object UniversalImportEngine {
 
     fun parseHysteria2Uri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
         return try {
-            val uri = URI(uriString)
-            val auth = uri.userInfo ?: ""
-            if (uri.host.isNullOrBlank()) {
+            val comp = extractUriComponents(uriString, "hysteria2", "hy2")
+                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed Hysteria2 URI structure")
+            val auth = comp.userInfo
+            if (comp.host.isBlank()) {
                 return ParsedItem.Invalid(uriString.take(60), "Hysteria2 link missing server host")
             }
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
-            } else "Hysteria2-${uri.host}"
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
+            } else "Hysteria2-${comp.host}"
 
-            val params = parseQueryParams(uri.rawQuery)
-            val sni = params["sni"] ?: uri.host ?: ""
+            val params = parseQueryParams(comp.query)
+            val sni = params["sni"] ?: comp.host
             val alpn = params["alpn"] ?: "h3"
 
             val profile = VlessProfile(
                 id = UUID.randomUUID().toString(),
                 name = name,
-                address = uri.host,
-                port = if (uri.port > 0) uri.port else 443,
+                address = comp.host,
+                port = if (comp.port in 1..65535) comp.port else 443,
                 uuid = auth,
                 encryption = "none",
                 transport = "udp",
@@ -424,24 +501,25 @@ object UniversalImportEngine {
 
     fun parseTuicUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
         return try {
-            val uri = URI(uriString)
-            val auth = uri.userInfo ?: ""
-            if (uri.host.isNullOrBlank()) {
+            val comp = extractUriComponents(uriString, "tuic")
+                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed TUIC URI structure")
+            val auth = comp.userInfo
+            if (comp.host.isBlank()) {
                 return ParsedItem.Invalid(uriString.take(60), "TUIC link missing host")
             }
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
-            } else "TUIC-${uri.host}"
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
+            } else "TUIC-${comp.host}"
 
-            val params = parseQueryParams(uri.rawQuery)
-            val sni = params["sni"] ?: uri.host ?: ""
+            val params = parseQueryParams(comp.query)
+            val sni = params["sni"] ?: comp.host
             val alpn = params["alpn"] ?: "h3"
 
             val profile = VlessProfile(
                 id = UUID.randomUUID().toString(),
                 name = name,
-                address = uri.host,
-                port = if (uri.port > 0) uri.port else 443,
+                address = comp.host,
+                port = if (comp.port in 1..65535) comp.port else 443,
                 uuid = auth,
                 encryption = "none",
                 transport = "quic",
@@ -463,17 +541,18 @@ object UniversalImportEngine {
 
     fun parseSocks5Uri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
         return try {
-            val uri = URI(uriString)
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
-            } else "SOCKS5-${uri.host}"
+            val comp = extractUriComponents(uriString, "socks5", "socks")
+                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed SOCKS5 URI structure")
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
+            } else "SOCKS5-${comp.host}"
 
             val profile = VlessProfile(
                 id = UUID.randomUUID().toString(),
                 name = name,
-                address = uri.host ?: "127.0.0.1",
-                port = if (uri.port > 0) uri.port else 1080,
-                uuid = uri.userInfo ?: "",
+                address = comp.host.ifBlank { "127.0.0.1" },
+                port = if (comp.port in 1..65535) comp.port else 1080,
+                uuid = comp.userInfo,
                 encryption = "none",
                 transport = "tcp",
                 security = "none",
@@ -492,20 +571,21 @@ object UniversalImportEngine {
 
     fun parseHttpProxyUri(uriString: String, fileName: String? = null, subUrl: String? = null): ParsedItem {
         return try {
-            val uri = URI(uriString)
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
-            } else "HTTP-${uri.host}"
+            val comp = extractUriComponents(uriString, "http", "https")
+                ?: return ParsedItem.Invalid(uriString.take(60), "Malformed HTTP proxy URI structure")
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
+            } else "HTTP-${comp.host}"
 
             val profile = VlessProfile(
                 id = UUID.randomUUID().toString(),
                 name = name,
-                address = uri.host ?: "127.0.0.1",
-                port = if (uri.port > 0) uri.port else 8080,
-                uuid = uri.userInfo ?: "",
+                address = comp.host.ifBlank { "127.0.0.1" },
+                port = if (comp.port in 1..65535) comp.port else 8080,
+                uuid = comp.userInfo,
                 encryption = "none",
                 transport = "tcp",
-                security = if (uri.scheme == "https") "tls" else "none",
+                security = if (comp.scheme.equals("https", ignoreCase = true)) "tls" else "none",
                 profileType = ProfileType.VLESS,
                 protocolType = ProtocolType.HTTP,
                 engineType = EngineType.XRAY,

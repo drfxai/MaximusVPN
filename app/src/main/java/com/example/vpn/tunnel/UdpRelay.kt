@@ -326,6 +326,18 @@ class UdpRelay(
 
                 // Read HTTP 101
                 val headerLine = readHttpLine(inStream)
+                if (headerLine.contains("301") || headerLine.contains("302")) {
+                    var location = ""
+                    while (true) {
+                        val line = readHttpLine(inStream)
+                        if (line.isEmpty() || line == "\r") break
+                        if (line.startsWith("Location:", ignoreCase = true)) {
+                            location = line.substringAfter(":").trim()
+                        }
+                    }
+                    val locInfo = if (location.isNotBlank()) " (Location: $location)" else ""
+                    throw IllegalStateException("WebSocket redirect detected for UDP tunnel: $headerLine$locInfo")
+                }
                 if (!headerLine.contains("101")) {
                     throw IllegalStateException("WebSocket handshake failed for UDP tunnel: $headerLine")
                 }
@@ -368,6 +380,10 @@ class UdpRelay(
 
     private fun configureTlsSocket(rawSocket: Socket, profile: VlessProfile): SSLSocket {
         val isReality = profile.security.equals("reality", ignoreCase = true)
+        if (isReality && profile.publicKey.isBlank()) {
+            throw javax.net.ssl.SSLException("REALITY Security Failure: Public key (pbk) is missing for REALITY profile '${profile.name}'")
+        }
+
         val sniHost = if (profile.sni.isNotBlank()) {
             profile.sni
         } else if (profile.host.isNotBlank()) {
@@ -376,6 +392,7 @@ class UdpRelay(
             profile.address
         }
 
+        val isUnsafe = profile.fingerprint.equals("unsafe", ignoreCase = true)
         val sslContext: SSLContext
         if (isReality) {
             val realityTrustManager = object : X509TrustManager {
@@ -385,8 +402,27 @@ class UdpRelay(
                 }
                 override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
             }
-            sslContext = SSLContext.getInstance("TLSv1.3").apply {
-                init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
+            sslContext = try {
+                SSLContext.getInstance("TLSv1.3").apply {
+                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
+                }
+            } catch (_: Exception) {
+                SSLContext.getInstance("TLS").apply {
+                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
+                }
+            }
+        } else if (isUnsafe) {
+            val trustAllManager = object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            }
+            sslContext = try {
+                SSLContext.getInstance("TLS").apply {
+                    init(null, arrayOf<TrustManager>(trustAllManager), java.security.SecureRandom())
+                }
+            } catch (_: Exception) {
+                SSLContext.getDefault()
             }
         } else {
             sslContext = try {

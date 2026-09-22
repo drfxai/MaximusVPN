@@ -352,14 +352,46 @@ object MihomoParser {
         sb.appendLine("    type: $proxyType")
         sb.appendLine("    server: ${profile.address}")
         sb.appendLine("    port: ${profile.port}")
-        sb.appendLine("    uuid: ${profile.uuid}")
-        if (profile.uuid.isNotBlank() && (proxyType == "hysteria2" || proxyType == "trojan")) {
-            sb.appendLine("    password: ${profile.uuid}")
+        when (proxyType) {
+            "vless" -> {
+                sb.appendLine("    uuid: ${profile.uuid}")
+                sb.appendLine("    network: ${profile.transport.ifBlank { "tcp" }}")
+            }
+            "vmess" -> {
+                sb.appendLine("    uuid: ${profile.uuid}")
+                sb.appendLine("    alterId: 0")
+                sb.appendLine("    cipher: auto")
+                sb.appendLine("    network: ${profile.transport.ifBlank { "tcp" }}")
+            }
+            "trojan" -> {
+                sb.appendLine("    password: ${profile.uuid}")
+                sb.appendLine("    network: ${profile.transport.ifBlank { "tcp" }}")
+            }
+            "hysteria2" -> {
+                sb.appendLine("    password: ${profile.uuid}")
+            }
+            "tuic" -> {
+                sb.appendLine("    uuid: ${profile.uuid}")
+                sb.appendLine("    password: ${profile.uuid}")
+            }
+            "ss" -> {
+                sb.appendLine("    password: ${profile.uuid}")
+                val cipher = if (profile.encryption.isNotBlank() && profile.encryption != "none") profile.encryption else "aes-128-gcm"
+                sb.appendLine("    cipher: $cipher")
+            }
+            "socks5", "http" -> {
+                if (profile.uuid.contains(":")) {
+                    sb.appendLine("    username: ${profile.uuid.substringBefore(":")}")
+                    sb.appendLine("    password: ${profile.uuid.substringAfter(":")}")
+                } else if (profile.uuid.isNotBlank()) {
+                    sb.appendLine("    password: ${profile.uuid}")
+                }
+            }
+            else -> {
+                sb.appendLine("    uuid: ${profile.uuid}")
+                sb.appendLine("    network: ${profile.transport.ifBlank { "tcp" }}")
+            }
         }
-        if (profile.encryption.isNotBlank() && profile.encryption != "none") {
-            sb.appendLine("    cipher: ${profile.encryption}")
-        }
-        sb.appendLine("    network: ${profile.transport}")
         sb.appendLine("    udp: true")
 
         val hasTls = profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)

@@ -24,6 +24,7 @@ import com.example.data.model.ConnectionState
 import com.example.data.model.ConnectionStatus
 import com.example.data.model.EngineType
 import com.example.data.model.ProfileType
+import com.example.data.model.ProtocolType
 import com.example.data.model.RoutingMode
 import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
@@ -369,9 +370,19 @@ class RayVpnService : VpnService() {
             // 7. Diagnostic step 7: Select and start active engine
             activeEngine = when (settings.preferredEngine) {
                 EngineType.MIHOMO -> com.example.vpn.engine.MihomoEngine.instance
-                EngineType.XRAY -> XrayEngineImpl.instance
+                EngineType.XRAY -> {
+                    if (profile.protocolType == ProtocolType.HYSTERIA2 || profile.protocolType == ProtocolType.TUIC) {
+                        com.example.vpn.engine.MihomoEngine.instance
+                    } else {
+                        XrayEngineImpl.instance
+                    }
+                }
                 EngineType.AUTO -> {
-                    if (profile.engineType == EngineType.MIHOMO || profile.profileType == ProfileType.MIHOMO_YAML) {
+                    if (profile.engineType == EngineType.MIHOMO ||
+                        profile.profileType == ProfileType.MIHOMO_YAML ||
+                        profile.protocolType == ProtocolType.HYSTERIA2 ||
+                        profile.protocolType == ProtocolType.TUIC
+                    ) {
                         com.example.vpn.engine.MihomoEngine.instance
                     } else {
                         XrayEngineImpl.instance

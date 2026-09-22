@@ -164,9 +164,9 @@ class XrayEngineImpl private constructor() : XrayEngine {
 
     override fun getVersion(): String = ENGINE_VERSION
 
-    override fun recordTraffic(bytesSent: Long, bytesReceived: Long) {
-        if (bytesSent > 0) txBytesCounter.addAndGet(bytesSent)
-        if (bytesReceived > 0) rxBytesCounter.addAndGet(bytesReceived)
+    override fun recordTraffic(sent: Long, received: Long) {
+        if (sent > 0) txBytesCounter.addAndGet(sent)
+        if (received > 0) rxBytesCounter.addAndGet(received)
     }
 
     private fun startStatsMonitor() {

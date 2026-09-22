@@ -84,7 +84,7 @@ class SecretChatManager(private val context: Context) {
                             EphemeralTimer.FIVE_MINUTES
                         },
                         unreadCount = obj.optInt("unreadCount", 0),
-                        lastMessageText = obj.optString("lastMessageText", null),
+                        lastMessageText = if (obj.has("lastMessageText") && !obj.isNull("lastMessageText")) obj.getString("lastMessageText") else null,
                         lastMessageTime = obj.optLong("lastMessageTime", System.currentTimeMillis()),
                         isVerifiedE2ee = obj.optBoolean("isVerifiedE2ee", true)
                     )

@@ -194,19 +194,68 @@ object ConfigurationAdapter {
         }
     }
 
+    private data class ParsedUriComponents(
+        val userInfo: String,
+        val host: String,
+        val port: Int,
+        val query: String,
+        val fragment: String
+    )
+
+    private fun extractUriComponents(uriString: String, scheme: String): ParsedUriComponents? {
+        val trimmed = uriString.trim()
+        val prefix = "$scheme://"
+        if (!trimmed.startsWith(prefix, ignoreCase = true)) return null
+        val withoutScheme = trimmed.substring(prefix.length)
+
+        val fragmentIdx = withoutScheme.indexOf('#')
+        val beforeFragment = if (fragmentIdx != -1) withoutScheme.substring(0, fragmentIdx) else withoutScheme
+        val fragment = if (fragmentIdx != -1) withoutScheme.substring(fragmentIdx + 1) else ""
+
+        val queryIdx = beforeFragment.indexOf('?')
+        val mainPart = if (queryIdx != -1) beforeFragment.substring(0, queryIdx) else beforeFragment
+        val queryString = if (queryIdx != -1) beforeFragment.substring(queryIdx + 1) else ""
+
+        val atIdx = mainPart.indexOf('@')
+        val userInfo = if (atIdx != -1) mainPart.substring(0, atIdx) else ""
+        val hostPort = if (atIdx != -1) mainPart.substring(atIdx + 1) else mainPart
+
+        val host: String
+        val port: Int
+        if (hostPort.startsWith("[")) {
+            val closing = hostPort.indexOf(']')
+            if (closing == -1) return null
+            host = hostPort.substring(1, closing)
+            val after = hostPort.substring(closing + 1)
+            val colon = after.indexOf(':')
+            port = if (colon != -1) after.substring(colon + 1).toIntOrNull() ?: 443 else 443
+        } else {
+            val colon = hostPort.lastIndexOf(':')
+            if (colon != -1) {
+                host = hostPort.substring(0, colon)
+                port = hostPort.substring(colon + 1).toIntOrNull() ?: 443
+            } else {
+                host = hostPort
+                port = 443
+            }
+        }
+        if (host.isBlank()) return null
+        return ParsedUriComponents(userInfo, host, port, queryString, fragment)
+    }
+
     fun parseTrojanUri(uriString: String): VlessProfile? {
         return try {
-            val uri = URI(uriString)
-            val host = uri.host ?: return null
-            val port = if (uri.port in 1..65535) uri.port else 443
-            val password = uri.userInfo ?: return null
+            val comp = extractUriComponents(uriString, "trojan") ?: return null
+            val host = comp.host
+            val port = if (comp.port in 1..65535) comp.port else 443
+            val password = comp.userInfo
             if (password.isBlank()) return null
 
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
             } else "Trojan-$host"
 
-            val params = parseQueryParams(uri.rawQuery)
+            val params = parseQueryParams(comp.query)
             val sni = params["sni"] ?: params["peer"] ?: host
             val transport = params["type"] ?: "tcp"
             val security = if (params["security"] != null) params["security"]!! else "tls"
@@ -237,17 +286,19 @@ object ConfigurationAdapter {
 
     fun parseHysteria2Uri(uriString: String): VlessProfile? {
         return try {
-            val uri = URI(uriString)
-            val host = uri.host ?: return null
-            val port = if (uri.port in 1..65535) uri.port else 443
-            val password = uri.userInfo ?: return null
+            val comp = extractUriComponents(uriString, "hysteria2")
+                ?: extractUriComponents(uriString, "hy2")
+                ?: return null
+            val host = comp.host
+            val port = if (comp.port in 1..65535) comp.port else 443
+            val password = comp.userInfo
             if (password.isBlank()) return null
 
-            val name = if (!uri.fragment.isNullOrBlank()) {
-                safeDecodeUrl(uri.fragment)
+            val name = if (comp.fragment.isNotBlank()) {
+                safeDecodeUrl(comp.fragment)
             } else "Hysteria2-$host"
 
-            val params = parseQueryParams(uri.rawQuery)
+            val params = parseQueryParams(comp.query)
             val sni = params["sni"] ?: host
 
             VlessProfile(

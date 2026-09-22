@@ -74,7 +74,8 @@ object VlessHeader {
             }
         } else if (isIpv6(destAddress)) {
             out.write(ATYPE_IPV6.toInt())
-            val ipBytes = java.net.InetAddress.getByName(destAddress).address
+            val cleanIp = destAddress.removeSurrounding("[", "]")
+            val ipBytes = java.net.InetAddress.getByName(cleanIp).address
             require(ipBytes.size == 16) { "IPv6 address must resolve to 16 bytes" }
             out.write(ipBytes)
         } else {

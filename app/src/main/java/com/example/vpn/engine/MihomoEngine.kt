@@ -236,16 +236,17 @@ class MihomoEngine private constructor() : VpnEngine {
     }
 
     private fun testNodeLatency(node: ProxyNode, protectSocket: (Socket) -> Boolean): Long? {
+        val socket = Socket()
         return try {
-            val socket = Socket()
             try { protectSocket(socket) } catch (_: Exception) {}
             val start = System.currentTimeMillis()
             socket.connect(InetSocketAddress(node.server, node.port), 3000)
             val latency = System.currentTimeMillis() - start
-            socket.close()
             latency
         } catch (_: Exception) {
             null
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
         }
     }
 }

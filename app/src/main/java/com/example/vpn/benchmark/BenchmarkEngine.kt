@@ -198,46 +198,75 @@ class BenchmarkEngine(
 
             // Stage 2: TCP Connection
             val socket = Socket()
-            val tcpStart = System.currentTimeMillis()
-            socket.connect(InetSocketAddress(inetAddress, profile.port), 3500)
-            tcpHandshake = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1)
+            try {
+                val tcpStart = System.currentTimeMillis()
+                socket.connect(InetSocketAddress(inetAddress, profile.port), 3500)
+                tcpHandshake = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1)
 
-            // Stage 3: TLS / REALITY Handshake (if enabled)
-            val needsTls = profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)
-            if (needsTls) {
-                val tlsStart = System.currentTimeMillis()
-                try {
-                    val sslSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-                    val sslSocket = sslSocketFactory.createSocket(socket, profile.address, profile.port, true) as SSLSocket
-                    val sniHost = profile.sni.ifBlank { profile.host.ifBlank { profile.address } }
-                    if (sniHost.isNotBlank()) {
-                        val params = SSLParameters()
-                        params.serverNames = listOf(SNIHostName(sniHost))
-                        sslSocket.sslParameters = params
+                // Stage 3: TLS / REALITY Handshake (if enabled)
+                val isReality = profile.security.equals("reality", ignoreCase = true)
+                val isTls = profile.security.equals("tls", ignoreCase = true) || isReality
+                if (isTls) {
+                    val tlsStart = System.currentTimeMillis()
+                    var sslSocket: SSLSocket? = null
+                    try {
+                        val sslContext = if (isReality) {
+                            val realityTrustManager = object : javax.net.ssl.X509TrustManager {
+                                override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+                                override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {
+                                    if (profile.publicKey.isNotBlank()) {
+                                        com.example.vpn.tunnel.RealityVerifier.verifyRealityPeer(chain, profile.publicKey)
+                                    }
+                                }
+                                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                            }
+                            try {
+                                javax.net.ssl.SSLContext.getInstance("TLSv1.3").apply {
+                                    init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
+                                }
+                            } catch (_: Exception) {
+                                javax.net.ssl.SSLContext.getInstance("TLS").apply {
+                                    init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
+                                }
+                            }
+                        } else {
+                            javax.net.ssl.SSLContext.getDefault()
+                        }
+                        val factory = sslContext.socketFactory
+                        sslSocket = factory.createSocket(socket, profile.address, profile.port, true) as SSLSocket
+                        val sniHost = profile.sni.ifBlank { profile.host.ifBlank { profile.address } }
+                        if (sniHost.isNotBlank()) {
+                            val params = SSLParameters()
+                            params.serverNames = listOf(SNIHostName(sniHost))
+                            sslSocket.sslParameters = params
+                        }
+                        sslSocket.soTimeout = 4000
+                        sslSocket.startHandshake()
+                        tlsHandshake = (System.currentTimeMillis() - tlsStart).coerceAtLeast(1)
+                    } catch (_: Exception) {
+                        // TLS Handshake failed
+                    } finally {
+                        try { sslSocket?.close() } catch (_: Exception) {}
                     }
-                    sslSocket.soTimeout = 4000
-                    sslSocket.startHandshake()
-                    tlsHandshake = (System.currentTimeMillis() - tlsStart).coerceAtLeast(1)
-                    sslSocket.close()
-                } catch (_: Exception) {
-                    socket.close()
                 }
-            } else {
-                socket.close()
+            } finally {
+                try { socket.close() } catch (_: Exception) {}
             }
 
             // Stage 4: Multi-sample Ping & Jitter
             for (i in 0 until totalPingAttempts) {
+                var s: Socket? = null
                 try {
-                    val s = Socket()
+                    s = Socket()
                     val pStart = System.currentTimeMillis()
                     s.connect(InetSocketAddress(inetAddress, profile.port), 2500)
                     val pLatency = System.currentTimeMillis() - pStart
-                    s.close()
                     pingSamples.add(pLatency)
                     successSamples++
                 } catch (_: Exception) {
                     // Ping failed
+                } finally {
+                    try { s?.close() } catch (_: Exception) {}
                 }
                 delay(40)
             }
