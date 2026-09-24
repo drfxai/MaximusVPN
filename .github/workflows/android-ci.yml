@@ -26,3 +26,11 @@ jobs:
           "$SDKMANAGER" 'platforms;android-36.1' 'build-tools;36.0.0'
       - name: Test and build debug APK
         run: bash gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Check release lint
+        run: bash gradlew --no-daemon :app:lintRelease
+      - name: Preserve lint report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-lint-report
+          path: app/build/**/lint-results-release.txt

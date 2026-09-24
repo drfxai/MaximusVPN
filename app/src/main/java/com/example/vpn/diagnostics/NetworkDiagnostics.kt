@@ -1,5 +1,6 @@
 package com.example.vpn.diagnostics
 
+import android.os.Build
 import com.example.data.model.VlessProfile
 import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +106,7 @@ object NetworkDiagnostics {
                     } catch (_: Exception) {}
                 }
 
-                if (profile.alpn.isNotBlank()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && profile.alpn.isNotBlank()) {
                     val alpnArray = profile.alpn.split(",").map { it.trim() }.toTypedArray()
                     try {
                         sslParams.applicationProtocols = alpnArray
@@ -117,9 +118,11 @@ object NetworkDiagnostics {
                 sslSocket.startHandshake()
 
                 tlsHandshakeTime = System.currentTimeMillis() - tlsStart
-                try {
-                    selectedAlpn = sslSocket.applicationProtocol
-                } catch (_: Throwable) {}
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        selectedAlpn = sslSocket.applicationProtocol
+                    } catch (_: Exception) {}
+                }
 
             } catch (e: Exception) {
                 // If Reality or self-signed, TLS handshake might fail strict CA validation, but TCP succeeded
