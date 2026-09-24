@@ -19,7 +19,7 @@ object ServerTester {
 
     /**
      * Performs a real multi-stage connectivity and latency test against the remote VLESS endpoint.
-     * Tests: 1. Configuration validity, 2. DNS resolution, 3. TCP 3-way handshake, 4. TLS/REALITY handshake if applicable.
+     * Tests configuration, DNS, TCP, TLS and WebSocket transport. Does not authenticate a proxy request or prove tunneled internet access.
      */
     suspend fun testServer(
         profile: VlessProfile,
@@ -39,7 +39,7 @@ object ServerTester {
 
         XrayLogManager.d("SERVER", "Initiating health check for '${profile.name}' (${profile.address}:${profile.port}, transport=${profile.transport}, sec=${profile.security})...")
 
-        val startTime = System.currentTimeMillis()
+        val startTime = System.nanoTime()
         var socket: Socket? = null
         var sslSocket: SSLSocket? = null
 
@@ -49,12 +49,12 @@ object ServerTester {
 
             // Stage 2: TCP Handshake
             socket = Socket()
-            try { protectSocket?.invoke(socket) } catch (_: Exception) {}
+            check(protectSocket?.invoke(socket) != false) { "VPN socket protection failed" }
             socket.soTimeout = timeoutMs
             val socketAddress = InetSocketAddress(inetAddress, profile.port)
             socket.connect(socketAddress, timeoutMs)
 
-            val tcpLatency = System.currentTimeMillis() - startTime
+            val tcpLatency = ((System.nanoTime() - startTime) / 1_000_000).coerceAtLeast(1)
 
             // Stage 3: TLS / Handshake Test if configured
             val sslLatency = if (profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)) {
@@ -84,50 +84,27 @@ object ServerTester {
                     }
                 }
                 val sslFactory = sslContext.socketFactory
-                val sniHost = if (profile.sni.isNotBlank()) profile.sni else profile.address
+                val sniHost = profile.sni.ifBlank { profile.host.ifBlank { profile.address } }
                 sslSocket = sslFactory.createSocket(socket, sniHost, profile.port, true) as SSLSocket
                 sslSocket.soTimeout = timeoutMs
 
                 val sslParams = SSLParameters().apply {
-                    if (sniHost.isNotBlank()) {
+                    if (!isReality) endpointIdentificationAlgorithm = "HTTPS"
+                    if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
                         serverNames = listOf(SNIHostName(sniHost))
                     }
                 }
                 sslSocket.sslParameters = sslParams
                 sslSocket.startHandshake()
-                System.currentTimeMillis() - startTime
+                ((System.nanoTime() - startTime) / 1_000_000).coerceAtLeast(1)
             } else {
                 tcpLatency
             }
 
             // Stage 4: WebSocket Handshake Validation if transport is WS
             val finalLatency = if (profile.transport.equals("ws", ignoreCase = true)) {
-                val activeSocket = sslSocket ?: socket
-                val outStream = activeSocket.getOutputStream()
-                val inStream = activeSocket.getInputStream()
-
-                val wsHost = if (profile.host.isNotBlank()) profile.host else profile.sni.ifBlank { profile.address }
-                val wsPath = if (profile.path.isNotBlank()) {
-                    if (profile.path.startsWith("/")) profile.path else "/${profile.path}"
-                } else "/"
-                val randomBytes = ByteArray(16).apply { java.security.SecureRandom().nextBytes(this) }
-                val wsKey = java.util.Base64.getEncoder().encodeToString(randomBytes)
-
-                val wsHandshake = "GET $wsPath HTTP/1.1\r\n" +
-                        "Host: $wsHost\r\n" +
-                        "Upgrade: websocket\r\n" +
-                        "Connection: Upgrade\r\n" +
-                        "Sec-WebSocket-Key: $wsKey\r\n" +
-                        "Sec-WebSocket-Version: 13\r\n" +
-                        "User-Agent: Mozilla/5.0 (Android; Maximus)\r\n\r\n"
-                outStream.write(wsHandshake.toByteArray(Charsets.UTF_8))
-                outStream.flush()
-
-                val responseLine = readHttpLine(inStream)
-                if (!responseLine.contains("101")) {
-                    throw IllegalStateException("WebSocket handshake rejected: $responseLine")
-                }
-                System.currentTimeMillis() - startTime
+                com.example.vpn.tunnel.WebSocketHandshake.perform(sslSocket ?: socket, profile, timeoutMs)
+                ((System.nanoTime() - startTime) / 1_000_000).coerceAtLeast(1)
             } else {
                 sslLatency
             }
@@ -156,6 +133,7 @@ object ServerTester {
                 status = ServerTestStatus.Unavailable(err)
             )
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             val err = e.localizedMessage ?: "Connection refused"
             XrayLogManager.w("SERVER", "Health check connection failed for '${profile.name}' (${profile.address}:${profile.port}): $err", e)
             ServerTestResult(
@@ -168,17 +146,4 @@ object ServerTester {
         }
     }
 
-    private fun readHttpLine(inStream: java.io.InputStream): String {
-        val sb = StringBuilder()
-        while (true) {
-            val b = inStream.read()
-            if (b == -1) break
-            if (b == '\n'.code) break
-            if (b != '\r'.code) {
-                sb.append(b.toChar())
-            }
-            if (sb.length > 512) break
-        }
-        return sb.toString().trim()
-    }
 }

@@ -300,46 +300,7 @@ class TcpVlessTunnel(
 
             val isWs = targetProfile.transport.equals("ws", ignoreCase = true)
             if (isWs) {
-                val wsHost = if (targetProfile.host.isNotBlank()) targetProfile.host else targetProfile.sni.ifBlank { targetProfile.address }
-                val wsPath = if (targetProfile.path.isNotBlank()) {
-                    if (targetProfile.path.startsWith("/")) targetProfile.path else "/${targetProfile.path}"
-                } else "/"
-                val randomBytes = ByteArray(16).apply { java.security.SecureRandom().nextBytes(this) }
-                val wsKey = java.util.Base64.getEncoder().encodeToString(randomBytes)
-
-                val wsHandshake = buildString {
-                    append("GET $wsPath HTTP/1.1\r\n")
-                    append("Host: $wsHost\r\n")
-                    append("Upgrade: websocket\r\n")
-                    append("Connection: Upgrade\r\n")
-                    append("Sec-WebSocket-Key: $wsKey\r\n")
-                    append("Sec-WebSocket-Version: 13\r\n")
-                    append("User-Agent: Mozilla/5.0 (Android; Maximus)\r\n")
-                    append("\r\n")
-                }
-                outStream.write(wsHandshake.toByteArray(Charsets.UTF_8))
-                outStream.flush()
-
-                val headerLine = readHttpLine(inStream)
-                if (headerLine.contains("301") || headerLine.contains("302")) {
-                    var location = ""
-                    while (true) {
-                        val line = readHttpLine(inStream)
-                        if (line.isEmpty() || line == "\r") break
-                        if (line.startsWith("Location:", ignoreCase = true)) {
-                            location = line.substringAfter(":").trim()
-                        }
-                    }
-                    val locInfo = if (location.isNotBlank()) " (Location: $location)" else ""
-                    throw IllegalStateException("WebSocket redirect detected: $headerLine$locInfo")
-                }
-                if (!headerLine.contains("101")) {
-                    throw IllegalStateException("WebSocket handshake failed: $headerLine")
-                }
-                while (true) {
-                    val line = readHttpLine(inStream)
-                    if (line.isEmpty() || line == "\r") break
-                }
+                WebSocketHandshake.perform(activeSocket, targetProfile)
             }
 
             // Protocol specific request header
@@ -483,7 +444,8 @@ class TcpVlessTunnel(
         ) as SSLSocket
 
         val params = SSLParameters()
-        if (sniHost.isNotBlank()) {
+        if (!isReality && !isUnsafe) params.endpointIdentificationAlgorithm = "HTTPS"
+        if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
             params.serverNames = listOf(javax.net.ssl.SNIHostName(sniHost))
         }
 
@@ -498,7 +460,8 @@ class TcpVlessTunnel(
 
         // Configure ALPN if requested
         if (profile.alpn.isNotBlank()) {
-            val alpnList = profile.alpn.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            val alpnList = if (profile.transport.equals("ws", true)) listOf("http/1.1")
+                else profile.alpn.split(',').map { it.trim() }.filter { it.isNotEmpty() }
             if (alpnList.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 params.applicationProtocols = alpnList.toTypedArray()
             }

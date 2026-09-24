@@ -81,7 +81,7 @@ class FailoverManager(
                 val isHealthy = checkHealth(currentProfile, settings.failoverThresholdMs)
                 if (!isHealthy) {
                     consecutiveFailures++
-                    XrayLogManager.w("FAILOVER", "Node $safeName health check failed ($consecutiveFailures/3).")
+                    XrayLogManager.w("FAILOVER", "Node $safeName is unavailable or exceeds the configured ${settings.failoverThresholdMs}ms latency limit ($consecutiveFailures/3).")
 
                     // Require 3 consecutive failures to avoid flapping
                     if (consecutiveFailures >= 3) {
@@ -263,7 +263,7 @@ class FailoverManager(
             }
 
         if (fallback != null) {
-            val reason = "Failover: Outage detected on $safeDegraded. Switched to ${fallback.profile.name}."
+            val reason = "Failover: Availability or latency policy triggered on $safeDegraded. Switched to ${fallback.profile.name}."
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
             onTriggerSwitch(fallback.profile, reason)

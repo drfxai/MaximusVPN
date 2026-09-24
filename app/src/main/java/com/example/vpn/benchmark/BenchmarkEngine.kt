@@ -21,17 +21,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.util.concurrent.TimeUnit
-import javax.net.ssl.SNIHostName
-import javax.net.ssl.SSLParameters
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
 
 class BenchmarkEngine(
     private val serverRepository: ServerRepository,
@@ -48,13 +40,6 @@ class BenchmarkEngine(
 
     @Volatile
     private var isPaused = false
-
-    private val benchmarkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(6, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
 
     /**
      * Starts benchmarking a list of profiles with controlled concurrency and real network execution.
@@ -77,7 +62,7 @@ class BenchmarkEngine(
             failed = 0,
             isRunning = true,
             isPaused = false,
-            estimatedBytes = profiles.size * mode.targetBytes,
+            estimatedBytes = 0, // Throughput is not measured by transport probes
             mode = mode
         )
 
@@ -173,218 +158,52 @@ class BenchmarkEngine(
         mode: BenchmarkMode,
         scoringProfile: ScoringProfile
     ): BenchmarkStageResult = withContext(Dispatchers.IO) {
-        val serverId = profile.id
-        var dnsLatency = 0L
-        var tcpHandshake = 0L
-        var tlsHandshake = 0L
-        var proxyHandshake = 0L
-        var ttfb = 0L
-        val pingSamples = mutableListOf<Long>()
-        var downloadMbps = 0.0
-        var uploadMbps = 0.0
-        var packetLossPercent = 0.0
-        var successSamples = 0
-        val totalPingAttempts = when (mode) {
-            BenchmarkMode.QUICK -> 3
-            BenchmarkMode.BALANCED -> 5
-            BenchmarkMode.DEEP -> 8
-        }
-
-        try {
-            // Stage 1: DNS Resolution
-            val dnsStart = System.currentTimeMillis()
-            val inetAddress = java.net.InetAddress.getByName(profile.address)
-            dnsLatency = (System.currentTimeMillis() - dnsStart).coerceAtLeast(1)
-
-            // Stage 2: TCP Connection
-            val socket = Socket()
-            try {
-                val tcpStart = System.currentTimeMillis()
-                socket.connect(InetSocketAddress(inetAddress, profile.port), 3500)
-                tcpHandshake = (System.currentTimeMillis() - tcpStart).coerceAtLeast(1)
-
-                // Stage 3: TLS / REALITY Handshake (if enabled)
-                val isReality = profile.security.equals("reality", ignoreCase = true)
-                val isTls = profile.security.equals("tls", ignoreCase = true) || isReality
-                if (isTls) {
-                    val tlsStart = System.currentTimeMillis()
-                    var sslSocket: SSLSocket? = null
-                    try {
-                        val sslContext = if (isReality) {
-                            val realityTrustManager = object : javax.net.ssl.X509TrustManager {
-                                override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                                override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {
-                                    if (profile.publicKey.isNotBlank()) {
-                                        com.example.vpn.tunnel.RealityVerifier.verifyRealityPeer(chain, profile.publicKey)
-                                    }
-                                }
-                                override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-                            }
-                            try {
-                                javax.net.ssl.SSLContext.getInstance("TLSv1.3").apply {
-                                    init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
-                                }
-                            } catch (_: Exception) {
-                                javax.net.ssl.SSLContext.getInstance("TLS").apply {
-                                    init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
-                                }
-                            }
-                        } else {
-                            javax.net.ssl.SSLContext.getDefault()
-                        }
-                        val factory = sslContext.socketFactory
-                        sslSocket = factory.createSocket(socket, profile.address, profile.port, true) as SSLSocket
-                        val sniHost = profile.sni.ifBlank { profile.host.ifBlank { profile.address } }
-                        if (sniHost.isNotBlank()) {
-                            val params = SSLParameters()
-                            params.serverNames = listOf(SNIHostName(sniHost))
-                            sslSocket.sslParameters = params
-                        }
-                        sslSocket.soTimeout = 4000
-                        sslSocket.startHandshake()
-                        tlsHandshake = (System.currentTimeMillis() - tlsStart).coerceAtLeast(1)
-                    } catch (_: Exception) {
-                        // TLS Handshake failed
-                    } finally {
-                        try { sslSocket?.close() } catch (_: Exception) {}
-                    }
-                }
-            } finally {
-                try { socket.close() } catch (_: Exception) {}
-            }
-
-            // Stage 4: Multi-sample Ping & Jitter
-            for (i in 0 until totalPingAttempts) {
-                var s: Socket? = null
-                try {
-                    s = Socket()
-                    val pStart = System.currentTimeMillis()
-                    s.connect(InetSocketAddress(inetAddress, profile.port), 2500)
-                    val pLatency = System.currentTimeMillis() - pStart
-                    pingSamples.add(pLatency)
-                    successSamples++
-                } catch (_: Exception) {
-                    // Ping failed
-                } finally {
-                    try { s?.close() } catch (_: Exception) {}
-                }
-                delay(40)
-            }
-
-            val measuredPing = if (pingSamples.isNotEmpty()) pingSamples.average().toLong() else tcpHandshake
-            packetLossPercent = ((totalPingAttempts - successSamples).toDouble() / totalPingAttempts.toDouble()) * 100.0
-
-            // Jitter calculation: average difference between consecutive pings
-            var jitter = 0L
-            if (pingSamples.size > 1) {
-                var diffSum = 0L
-                for (i in 0 until pingSamples.size - 1) {
-                    diffSum += Math.abs(pingSamples[i + 1] - pingSamples[i])
-                }
-                jitter = diffSum / (pingSamples.size - 1)
-            }
-
-            // Stage 5: Throughput / Download & TTFB test
-            val testTarget = when (mode) {
-                BenchmarkMode.QUICK -> "http://www.google.com/generate_204"
-                BenchmarkMode.BALANCED -> "https://speed.cloudflare.com/__down?bytes=5000000"
-                BenchmarkMode.DEEP -> "https://speed.cloudflare.com/__down?bytes=15000000"
-            }
-
-            val ttfbStart = System.currentTimeMillis()
-            val request = Request.Builder().url(testTarget).build()
-            val throughputStart = System.currentTimeMillis()
-
-            try {
-                benchmarkHttpClient.newCall(request).execute().use { response ->
-                    ttfb = (System.currentTimeMillis() - ttfbStart).coerceAtLeast(measuredPing)
-                    if (response.isSuccessful) {
-                        val body = response.body
-                        val bytesRead = body?.bytes()?.size ?: 0
-                        val durationSec = (System.currentTimeMillis() - throughputStart) / 1000.0
-                        if (durationSec > 0.05 && bytesRead > 0) {
-                            downloadMbps = ((bytesRead * 8.0) / (durationSec * 1_000_000.0))
-                            uploadMbps = downloadMbps * 0.35 // Proportional upload estimation
-                        } else {
-                            // Synthesize baseline based on latency
-                            downloadMbps = (1000.0 / measuredPing.coerceAtLeast(10)).coerceIn(5.0, 180.0)
-                            uploadMbps = downloadMbps * 0.35
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // If cloudflare speed endpoint is unreachable, compute score from latency & handshakes
-                downloadMbps = (1200.0 / measuredPing.coerceAtLeast(15)).coerceIn(2.0, 150.0)
-                uploadMbps = downloadMbps * 0.3
-            }
-
-            proxyHandshake = (tcpHandshake + tlsHandshake).coerceAtLeast(1)
-
-            // Stability: based on jitter, packet loss and success rate
-            val successRate = (successSamples.toDouble() / totalPingAttempts.toDouble()) * 100.0
-            val stabilityPercent = (100.0 - (packetLossPercent * 1.5) - (jitter * 0.25)).coerceIn(5.0, 100.0)
-
-            // Stage 6: Calculate Normalized Scores & Category
-            val scores = ScoringEngine.calculateScores(
-                speedMbps = downloadMbps,
-                latencyMs = measuredPing,
-                jitterMs = jitter,
-                packetLoss = packetLossPercent,
-                stability = stabilityPercent,
-                successRate = successRate,
-                scoringProfile = scoringProfile
-            )
-
-            val category = ServerCategory.fromScoreAndHealth(
-                overallScore = scores.overallScore,
-                latencyMs = measuredPing,
-                packetLoss = packetLossPercent,
-                stability = stabilityPercent
-            )
-
-            BenchmarkStageResult(
-                serverId = serverId,
-                dnsLatencyMs = dnsLatency,
-                tcpHandshakeMs = tcpHandshake,
-                tlsHandshakeMs = tlsHandshake,
-                proxyHandshakeMs = proxyHandshake,
-                ttfbMs = ttfb,
-                pingMs = measuredPing,
-                downloadMbps = downloadMbps,
-                uploadMbps = uploadMbps,
-                jitterMs = jitter,
-                packetLossPercent = packetLossPercent,
-                successRatePercent = successRate,
-                stabilityPercent = stabilityPercent,
-                speedScore = scores.speedScore,
-                latencyScore = scores.latencyScore,
-                stabilityScore = scores.stabilityScore,
-                reliabilityScore = scores.reliabilityScore,
-                overallScore = scores.overallScore,
-                category = category,
-                isSuccess = true,
-                errorMessage = null,
-                testedAt = System.currentTimeMillis()
-            )
-
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            XrayLogManager.w("BENCHMARK", "Failed benchmark for ${profile.name}: ${e.message}")
-
-            BenchmarkStageResult(
-                serverId = serverId,
-                pingMs = 0,
-                downloadMbps = 0.0,
-                uploadMbps = 0.0,
-                packetLossPercent = 100.0,
-                successRatePercent = 0.0,
-                stabilityPercent = 0.0,
-                overallScore = 0.0,
-                category = ServerCategory.OFFLINE,
-                isSuccess = false,
-                errorMessage = e.localizedMessage ?: "Connection timed out",
-                testedAt = System.currentTimeMillis()
-            )
-        }
+        measureTransportBenchmark(profile, mode, scoringProfile)
     }
+}
+
+/** Endpoint transport measurements only: no direct downloads or invented throughput. */
+internal suspend fun measureTransportBenchmark(
+    profile: VlessProfile,
+    mode: BenchmarkMode,
+    scoringProfile: ScoringProfile,
+    probe: suspend (VlessProfile) -> com.example.data.model.ServerTestResult = { com.example.vpn.ServerTester.testServer(it) }
+): BenchmarkStageResult {
+    val attempts = when (mode) {
+        BenchmarkMode.QUICK -> 3
+        BenchmarkMode.BALANCED -> 5
+        BenchmarkMode.DEEP -> 8
+    }
+    val samples = mutableListOf<Long>()
+    var lastError = "No successful transport probes"
+    repeat(attempts) {
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        when (val status = probe(profile).status) {
+            is com.example.data.model.ServerTestStatus.Available -> samples.add(status.latencyMs)
+            is com.example.data.model.ServerTestStatus.Slow -> samples.add(status.latencyMs)
+            is com.example.data.model.ServerTestStatus.Unavailable -> lastError = status.reason
+            is com.example.data.model.ServerTestStatus.InvalidConfig -> lastError = status.error
+            else -> lastError = "Transport probe did not complete"
+        }
+        if (it < attempts - 1) delay(40)
+    }
+    if (samples.isEmpty()) return BenchmarkStageResult(
+        serverId = profile.id, isSuccess = false, errorMessage = lastError,
+        packetLossPercent = 100.0, successRatePercent = 0.0, stabilityPercent = 0.0,
+        category = ServerCategory.OFFLINE
+    )
+    val ping = samples.average().toLong().coerceAtLeast(1)
+    val jitter = samples.zipWithNext { a, b -> kotlin.math.abs(a - b) }.takeIf { it.isNotEmpty() }?.average()?.toLong() ?: 0L
+    val successRate = samples.size * 100.0 / attempts
+    val loss = 100.0 - successRate
+    val stability = (100.0 - loss * 1.5 - jitter * 0.25).coerceIn(0.0, 100.0)
+    val scores = ScoringEngine.calculateScores(0.0, ping, jitter, loss, stability, successRate, scoringProfile)
+    return BenchmarkStageResult(
+        serverId = profile.id, pingMs = ping, jitterMs = jitter,
+        packetLossPercent = loss, successRatePercent = successRate, stabilityPercent = stability,
+        speedScore = 0.0, latencyScore = scores.latencyScore, stabilityScore = scores.stabilityScore,
+        reliabilityScore = scores.reliabilityScore, overallScore = scores.overallScore,
+        category = ServerCategory.fromScoreAndHealth(scores.overallScore, ping, loss, stability),
+        isSuccess = true
+    )
 }
