@@ -393,6 +393,9 @@ class UdpRelay(
         }
 
         val isUnsafe = profile.fingerprint.equals("unsafe", ignoreCase = true)
+        if (isUnsafe && !com.example.BuildConfig.DEBUG) {
+            throw javax.net.ssl.SSLException("Unsafe TLS is disabled in release builds")
+        }
         val sslContext: SSLContext
         if (isReality) {
             val realityTrustManager = object : X509TrustManager {
@@ -614,4 +617,3 @@ class UdpRelay(
         }
     }
 }
-
