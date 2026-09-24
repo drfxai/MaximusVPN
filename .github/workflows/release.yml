@@ -39,6 +39,7 @@ jobs:
       - name: Verify artifact
         run: |
           test -s app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
           sha256sum app/build/outputs/apk/release/app-release.apk > app-release.apk.sha256
       - name: Publish release
         env:
