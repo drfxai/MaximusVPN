@@ -38,7 +38,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD"
+          test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD" && test -s "$KEYSTORE_PATH"
           bash gradlew --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
       - name: Verify artifact
         run: |
