@@ -40,15 +40,33 @@ jobs:
         run: |
           test -n "$STORE_PASSWORD" && test -n "$KEY_PASSWORD" && test -s "$KEYSTORE_PATH"
           bash gradlew --no-daemon :app:testDebugUnitTest :app:lintRelease :app:assembleRelease
-      - name: Verify artifact
+      - name: Verify and checksum APKs
         run: |
-          test -s app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
-          sha256sum app/build/outputs/apk/release/app-release.apk > app-release.apk.sha256
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("app/build/outputs/apk/release")
+          elements = json.loads((root / "output-metadata.json").read_text())["elements"]
+          outputs = {
+              tuple((item["filterType"], item["value"]) for item in element["filters"]): element["outputFile"]
+              for element in elements
+          }
+          assert outputs.get((("ABI", "arm64-v8a"),)) == "app-arm64-v8a-release.apk", outputs
+          assert outputs.get(()) == "app-universal-release.apk", outputs
+          PY
+          cp app/build/outputs/apk/release/app-arm64-v8a-release.apk arm64-v8a.apk
+          cp app/build/outputs/apk/release/app-universal-release.apk app-release.apk
+          for apk in arm64-v8a.apk app-release.apk; do
+            test -s "$apk"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
+          done
+          sha256sum arm64-v8a.apk app-release.apk > SHA256SUMS
+          sha256sum --check SHA256SUMS
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           case "$RELEASE_TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo 'Expected semver tag such as v1.0.1'; exit 1 ;; esac
-          gh release create "$RELEASE_TAG" app/build/outputs/apk/release/app-release.apk app-release.apk.sha256 --target "$GITHUB_SHA" --title "Maximus VPN $RELEASE_TAG" --notes "Signed Android APK. SHA-256 checksum attached."
+          gh release create "$RELEASE_TAG" arm64-v8a.apk app-release.apk SHA256SUMS --target "$GITHUB_SHA" --title "Maximus VPN $RELEASE_TAG" --notes "Signed Android APKs: arm64-v8a.apk for ARM64 devices and app-release.apk for other supported devices. Verify downloads with SHA256SUMS."
