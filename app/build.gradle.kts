@@ -27,17 +27,10 @@ android {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       val kFile = file(keystorePath)
-      if (kFile.exists()) {
-        storeFile = kFile
-        storePassword = System.getenv("STORE_PASSWORD")
-        keyAlias = "upload"
-        keyPassword = System.getenv("KEY_PASSWORD")
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
+      storeFile = kFile
+      storePassword = System.getenv("STORE_PASSWORD")
+      keyAlias = "upload"
+      keyPassword = System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -65,8 +58,8 @@ android {
     buildConfig = true
   }
   lint {
-    checkReleaseBuilds = false
-    abortOnError = false
+    checkReleaseBuilds = true
+    abortOnError = true
     disable.addAll(listOf("InvalidFragmentVersionForActivityResult", "UnusedMaterial3ScaffoldPaddingParameter"))
   }
 
@@ -152,4 +145,16 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
+}
+
+tasks.configureEach {
+  if (name == "packageRelease" || name == "signReleaseBundle") {
+    doFirst {
+      require(!System.getenv("STORE_PASSWORD").isNullOrBlank() &&
+        !System.getenv("KEY_PASSWORD").isNullOrBlank() &&
+        android.signingConfigs.getByName("release").storeFile?.isFile == true) {
+        "Release signing requires KEYSTORE_PATH, STORE_PASSWORD, and KEY_PASSWORD."
+      }
+    }
+  }
 }
