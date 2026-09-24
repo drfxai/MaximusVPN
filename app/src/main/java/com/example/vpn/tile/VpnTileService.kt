@@ -94,8 +94,7 @@ class VpnTileService : TileService() {
                 )
                 startActivityAndCollapse(pendingIntent)
             } else {
-                @Suppress("DEPRECATION")
-                startActivityAndCollapse(intent)
+                startActivity(intent)
             }
         } catch (_: Exception) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
