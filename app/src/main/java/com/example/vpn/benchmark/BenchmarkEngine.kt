@@ -178,7 +178,15 @@ internal suspend fun measureTransportBenchmark(
     var lastError = "No successful transport probes"
     repeat(attempts) {
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        when (val status = probe(profile).status) {
+        val result = try {
+            probe(profile)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            com.example.data.model.ServerTestResult(profile.id,
+                com.example.data.model.ServerTestStatus.Unavailable(e.message ?: "Transport probe failed"))
+        }
+        when (val status = result.status) {
             is com.example.data.model.ServerTestStatus.Available -> samples.add(status.latencyMs)
             is com.example.data.model.ServerTestStatus.Slow -> samples.add(status.latencyMs)
             is com.example.data.model.ServerTestStatus.Unavailable -> lastError = status.reason

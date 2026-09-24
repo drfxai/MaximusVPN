@@ -30,6 +30,7 @@ class ServerTransportProbeTest {
                 peer.get(4, TimeUnit.SECONDS)
             }
         } finally { executor.shutdownNow() }
+        Unit
     }
 
     @Test fun failedSocketProtectionStopsTheProbe() = runBlocking {

@@ -255,7 +255,7 @@ class TcpVlessTunnel(
         try {
             if (decision == RoutingDecision.DIRECT) {
                 rawSocket = Socket()
-                try { protectSocket(rawSocket) } catch (_: Exception) {}
+                check(protectSocket(rawSocket)) { "VPN socket protection failed" }
                 rawSocket.tcpNoDelay = true
                 rawSocket.keepAlive = true
                 try { rawSocket.receiveBufferSize = 524288 } catch (_: Exception) {}
@@ -278,7 +278,7 @@ class TcpVlessTunnel(
             val targetProfile = profile ?: throw IllegalStateException("No active profile for proxy routing")
 
             rawSocket = Socket()
-            try { protectSocket(rawSocket) } catch (_: Exception) {}
+            check(protectSocket(rawSocket)) { "VPN socket protection failed" }
             rawSocket.tcpNoDelay = true
             rawSocket.keepAlive = true
             try { rawSocket.receiveBufferSize = 524288 } catch (_: Exception) {}
@@ -478,7 +478,9 @@ class TcpVlessTunnel(
         }
 
         sslSocket.sslParameters = params
+        sslSocket.soTimeout = 10000
         sslSocket.startHandshake()
+        sslSocket.soTimeout = 0
         return sslSocket
     }
 

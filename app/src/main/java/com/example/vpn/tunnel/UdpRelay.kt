@@ -282,7 +282,7 @@ class UdpRelay(
 
         try {
             rawSocket = Socket()
-            try { protectSocket(rawSocket) } catch (_: Exception) {}
+            check(protectSocket(rawSocket)) { "VPN socket protection failed" }
             rawSocket.tcpNoDelay = true
             rawSocket.keepAlive = true
             try { rawSocket.receiveBufferSize = 524288 } catch (_: Exception) {}
@@ -416,7 +416,9 @@ class UdpRelay(
         }
 
         sslSocket.sslParameters = params
+        sslSocket.soTimeout = 10000
         sslSocket.startHandshake()
+        sslSocket.soTimeout = 0
         return sslSocket
     }
 
