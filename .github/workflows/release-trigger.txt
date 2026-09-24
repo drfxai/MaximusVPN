@@ -1,1 +1,0 @@
-One-time signed Maximus VPN v1.0.0 release trigger. Remove this file and the matching push trigger after publication.
