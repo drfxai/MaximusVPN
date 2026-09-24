@@ -432,6 +432,9 @@ class TcpVlessTunnel(
         }
 
         val isUnsafe = profile.fingerprint.equals("unsafe", ignoreCase = true)
+        if (isUnsafe && !com.example.BuildConfig.DEBUG) {
+            throw javax.net.ssl.SSLException("Unsafe TLS is disabled in release builds")
+        }
         val sslContext: SSLContext
         if (isReality) {
             // For REALITY: Strict peer certificate verification against server public key / fingerprint
@@ -893,4 +896,3 @@ object WebSocketCodec {
         return payload
     }
 }
-
