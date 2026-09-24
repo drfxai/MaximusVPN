@@ -4,8 +4,8 @@ Native Android VPN application. The installable APK is published under [GitHub R
 
 ## Install
 
-1. Open the latest release and download `app-release.apk` and `app-release.apk.sha256`.
-2. Compare the APK SHA-256 digest with the checksum file. On a computer, run `sha256sum app-release.apk`.
+1. Open the latest release and download `arm64-v8a.apk` for an ARM64 Android device, or `app-release.apk` for another supported device. Download `SHA256SUMS` too.
+2. Put the APK and `SHA256SUMS` in the same directory and run `sha256sum --check SHA256SUMS` on a computer. Both APKs must be present for the full check; to check one file, compare its `sha256sum` output with its line in `SHA256SUMS`.
 3. Transfer the APK to your Android device, open it, and follow Android's prompt to allow installation from that source. Grant VPN permission when the app requests it.
 
 If no APK is listed in Releases, no installable production build has been published yet. Android may require uninstalling an older copy if it was signed with a different certificate; uninstalling can erase local app data.
@@ -26,7 +26,7 @@ Use a stable signing keystore. In repository Settings → Secrets and variables 
 
 Never commit the JKS file or passwords. Back up the original signing key securely: users cannot update an installed APK if a future release uses a different signing certificate.
 
-After CI passes on `main`, run **Actions → Signed Android release → Run workflow** with a fresh version tag such as `v1.0.1`. The workflow builds, tests, checks the signature, and uploads the APK and checksum to Releases. The workflow fails without valid signing credentials. Increase `versionCode` and `versionName` in `app/build.gradle.kts` for each app update before publishing.
+After CI passes on `main`, run **Actions → Signed Android release → Run workflow** with a fresh version tag such as `v1.0.1`. The workflow builds, tests, checks both signatures, and uploads the ARM64 APK, universal APK, and `SHA256SUMS` to Releases. GitHub adds the source code zip and tar.gz archives for the tag automatically. The workflow fails without valid signing credentials. Increase `versionCode` and `versionName` in `app/build.gradle.kts` for each app update before publishing.
 
 ## Security status
 
