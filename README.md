@@ -51,6 +51,10 @@ The Samsung Android 15 report for v1.0.3 showed that TUN establishment succeeded
 
 The diagnostics screen can now make a real HTTPS request through Android's active VPN route. The result and measured latency are included in exported diagnostic reports. This separates TUN setup and server-port reachability from verified internet traffic. A failed probe can still reflect endpoint filtering, so the report records the failed endpoint response for troubleshooting.
 
+## v1.0.5 source update
+
+This release tightens VLESS, HTTP CONNECT, SOCKS5, TLS, subscription redirect, and packet validation; protects subscription URLs at rest; and updates database migration and lookup paths. The app now routes its own browser traffic through the active VPN, labels IPv6 controls as leak blocking, and describes chat as a local contact preview because authenticated peer messaging is not implemented. Release automation verifies upgrade from v1.0.4.
+
 ## v1.0.3 review and validation
 
 This release builds standalone ARM64 and universal APKs with extracted native libraries. Both keep the same application ID and signing key. Android 15 CI checks installation and startup. The release workflow checks upgrading from the signed v1.0.2 universal APK; it also tests the ARM64 APK when the emulator advertises ARM64 translation. Physical Samsung installation remains a separate device check.
