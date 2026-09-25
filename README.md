@@ -30,7 +30,7 @@ After CI passes on `main`, run **Actions → Signed Android release → Run work
 
 ## Security status
 
-The VPN uses Android `VpnService` and a Kotlin tunnel path. Configuration compatibility with Xray and Mihomo does not by itself mean their native engines are embedded. The secret chat implementation has not completed authenticated key exchange or peer transport and should not be relied upon for private messaging. Validate DNS, IPv6, failover, and lockdown behavior on real Android devices before presenting a release as production secure.
+The VPN uses Android `VpnService` and the bundled native Xray-core for Xray-compatible profiles. Mihomo configurations still require a Mihomo core and are not executed. The secret chat implementation has not completed authenticated key exchange or peer transport and should not be relied upon for private messaging. Validate DNS, IPv6, failover, and lockdown behavior on real Android devices before presenting a release as production secure.
 
 ## v1.0.2 diagnostic corrections
 
@@ -38,7 +38,7 @@ Health checks validate endpoint transport (TCP, TLS, and WebSocket), not VLESS a
 
 Benchmarks use the same transport validation and count unsuccessful samples. Download/upload throughput is unmeasured (stored as zero), and no direct internet speed test or synthetic speed is attributed to a node. Historical benchmark scores from older builds should be refreshed. Failover messages distinguish the configured latency policy from proven availability.
 
-Diagnostics display the build version and Kotlin forwarding runtime. Native Xray execution is not integrated. DNS leak tests, DoH runtime verification and end-to-end connectivity are not inferred from settings or a TUN interface.
+Diagnostics display the build version and selected forwarding runtime. DNS leak tests and DoH runtime verification are not inferred from settings or a TUN interface.
 
 To publish without the manual Actions form, update the app version and `release-version.txt` together in a reviewed change to `main`. A change to that file starts the same signed release workflow; use a new tag each time. Release assets include `arm64-v8a.apk`, `app-release.apk`, `SHA256SUMS`, and GitHub's source archives.
 
@@ -46,6 +46,10 @@ To publish without the manual Actions form, update the app version and `release-
 ## v1.0.4 device diagnostics fix
 
 The Samsung Android 15 report for v1.0.3 showed that TUN establishment succeeded while all outbound TCP and DoH sockets failed Android `VpnService.protect()`. New TCP sockets now bind before protection so they have a usable file descriptor, and a protection probe must pass before the app reports `CONNECTED`. A later protection failure stops forwarding with an error instead of rotating servers. Failover ignores duplicate imports and the current server endpoint, and its cooldown survives reconnects. Release automation checks installation over v1.0.3; a physical ARM64 traffic test is still needed to confirm the device result.
+
+## v1.0.7 native Xray and end-to-end diagnostics
+
+VLESS, VMess, Trojan and Shadowsocks nodes supported by the configuration adapter now run through pinned XTLS/libXray Xray-core. The Android service passes its protected TUN descriptor to Xray-core and does not read the same descriptor through the Kotlin forwarding loop. Other unsupported profile formats remain rejected. Release CI downloads the official libXray Android artifact and verifies its pinned SHA-256 before packaging. Native proxy metrics are sampled for traffic totals.
 
 ## v1.0.6 end-to-end connectivity diagnostics
 
@@ -61,7 +65,7 @@ This release builds standalone ARM64 and universal APKs with extracted native li
 
 Runtime corrections include packet bounds, blocking TUN reads, shared service settings, failed socket protection, duplicate TCP uploads, FIN payloads, bounded queues, WebSocket ping/pong handling, UDP frame reassembly and UDP receive lifetime. DNS-over-HTTPS no longer silently falls back to plaintext DNS. Browser certificate errors are rejected.
 
-Runtime support is limited to VLESS and Trojan over TCP/WebSocket with none/TLS security, and unauthenticated HTTP CONNECT/SOCKS5 TCP proxies. Only VLESS has proxied UDP in this build. Unsupported profiles remain importable but are rejected before VPN setup. Native Xray/Mihomo, REALITY, Vision, VMess, Shadowsocks, Hysteria and TUIC are not implemented. Imported raw routing/group configuration is not executed by a native core.
+The Kotlin forwarding loop is retained for Mihomo. Native Xray handles compatible Xray profiles, subject to the supported transport and security fields mapped by the profile adapter; raw Xray JSON is passed to Xray-core. Hysteria2 and TUIC remain dependent on an unavailable Mihomo runtime.
 
 Peer discovery is not an authenticated relay; automatic failover no longer invents proxy credentials from bridge or mesh records. Chat sending is disabled because authenticated peer transport has not been implemented.
 
