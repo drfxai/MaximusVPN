@@ -15,6 +15,7 @@ enum class ConnectionStatus {
 data class ConnectionState(
     val status: ConnectionStatus = ConnectionStatus.DISCONNECTED,
     val activeProfile: VlessProfile? = null,
+    val activeEngineName: String? = null,
     val connectedDurationSeconds: Long = 0,
     val uploadBytes: Long = 0,
     val downloadBytes: Long = 0,
