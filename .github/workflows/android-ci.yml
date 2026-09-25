@@ -28,7 +28,7 @@ jobs:
       - name: Fetch verified native Xray runtime
         run: bash scripts/fetch-libxray-android.sh
       - name: Test and build debug APK
-        run: bash gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: bash gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Check release lint
         run: bash gradlew --no-daemon :app:lintRelease
       - name: Enable KVM
@@ -43,7 +43,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: bash scripts/install-smoke.sh app/build/outputs/apk/debug/app-debug.apk
+          script: bash scripts/install-smoke.sh app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Preserve lint report
         if: failure()
         uses: actions/upload-artifact@v4
