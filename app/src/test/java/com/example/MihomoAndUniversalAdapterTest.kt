@@ -244,9 +244,20 @@ class MihomoAndUniversalAdapterTest {
         assertTrue(encodedFrame.isNotEmpty())
         assertTrue(encodedFrame.size > originalData.size) // Has header + 4 byte mask
 
-        val inputStream = java.io.ByteArrayInputStream(encodedFrame)
-        val decodedPayload = com.example.vpn.tunnel.WebSocketCodec.readFrame(inputStream)
-        assertNotNull(decodedPayload)
-        assertEquals(String(originalData, Charsets.UTF_8), String(decodedPayload!!, Charsets.UTF_8))
+        assertEquals(0x82, encodedFrame[0].toInt() and 255)
+        assertEquals(0x80 or originalData.size, encodedFrame[1].toInt() and 255)
+        val mask = encodedFrame.copyOfRange(2, 6)
+        val unmasked = ByteArray(originalData.size) { index ->
+            (encodedFrame[index + 6].toInt() xor mask[index % 4].toInt()).toByte()
+        }
+        org.junit.Assert.assertArrayEquals(originalData, unmasked)
+
+        // Server-to-client frames are unmasked (RFC 6455 section 5.1).
+        val serverFrame = byteArrayOf(0x82.toByte(), originalData.size.toByte()) + originalData
+        val decodedPayload = com.example.vpn.tunnel.WebSocketCodec.readFrame(java.io.ByteArrayInputStream(serverFrame))
+        org.junit.Assert.assertArrayEquals(originalData, decodedPayload)
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            com.example.vpn.tunnel.WebSocketCodec.readFrame(java.io.ByteArrayInputStream(encodedFrame))
+        }
     }
 }
