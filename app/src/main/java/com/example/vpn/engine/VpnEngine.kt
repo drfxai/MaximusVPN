@@ -39,3 +39,13 @@ interface VpnEngine {
     fun getActiveProxyName(): String? = null
     fun recordTraffic(sent: Long, received: Long) {}
 }
+
+/** Engine which consumes the VpnService TUN descriptor directly. */
+interface NativeTunVpnEngine : VpnEngine {
+    fun startWithTun(
+        profile: VlessProfile,
+        settings: AppSettings,
+        tunFd: Int,
+        protectFd: (Int) -> Boolean
+    ): AppResult<Unit>
+}

@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.raytunnel.vpnrx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 6
-    versionName = "1.0.5"
+    versionCode = 8
+    versionName = "1.0.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -84,6 +84,7 @@ secrets {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  implementation(files("libs/libXray.aar"))
   coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
   implementation(platform(libs.androidx.compose.bom))
   // implementation(platform(libs.firebase.bom))

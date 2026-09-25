@@ -87,6 +87,8 @@ fun DiagnosticsScreen(
     val connState by viewModel.connectionState.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val healthState by viewModel.subsystemHealth.collectAsStateWithLifecycle()
+    val tunnelTest by viewModel.tunnelConnectivity.collectAsStateWithLifecycle()
+    val tunnelTestRunning by viewModel.isTunnelTestRunning.collectAsStateWithLifecycle()
 
     var logSearchQuery by remember { mutableStateOf("") }
     var showReportDialog by remember { mutableStateOf(false) }
@@ -162,6 +164,34 @@ fun DiagnosticsScreen(
                 onThemeChange = { isDark ->
                     settingsViewModel.setDarkTheme(isDark)
                 }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Button(
+            onClick = { viewModel.testTunnelConnectivity() },
+            enabled = !tunnelTestRunning,
+            colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.surfaceElevated),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp).testTag("test_tunnel_connectivity_button")
+        ) {
+            Text(
+                text = if (tunnelTestRunning) "Testing tunneled internet…" else "Test end-to-end VPN connectivity",
+                color = AppTheme.colors.primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        tunnelTest?.let { result ->
+            Text(
+                text = if (result.reachable) {
+                    "Tunnel traffic verified • HTTP ${result.httpStatus} • ${result.latencyMs} ms"
+                } else {
+                    "Tunnel test failed • ${result.errorMessage ?: "No response"}"
+                },
+                color = if (result.reachable) AppTheme.colors.statusConnected else AppTheme.colors.statusError,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 4.dp).testTag("tunnel_connectivity_result")
             )
         }
 

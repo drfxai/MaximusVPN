@@ -13,6 +13,8 @@ import com.example.xray.XrayLogManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,6 +37,30 @@ class DiagnosticsViewModel(
 
     private val _subsystemHealth = MutableStateFlow(SubsystemHealth())
     val subsystemHealth: StateFlow<SubsystemHealth> = _subsystemHealth.asStateFlow()
+
+    private val _tunnelConnectivity = MutableStateFlow<com.example.vpn.diagnostics.TunnelConnectivityResult?>(null)
+    val tunnelConnectivity: StateFlow<com.example.vpn.diagnostics.TunnelConnectivityResult?> = _tunnelConnectivity.asStateFlow()
+    private val _isTunnelTestRunning = MutableStateFlow(false)
+    val isTunnelTestRunning: StateFlow<Boolean> = _isTunnelTestRunning.asStateFlow()
+
+    fun testTunnelConnectivity() {
+        if (_isTunnelTestRunning.value) return
+        if (!connectionState.value.isVpnInterfaceActive) {
+            _tunnelConnectivity.value = com.example.vpn.diagnostics.TunnelConnectivityResult(
+                reachable = false,
+                errorMessage = "Connect the VPN before testing tunneled internet access."
+            )
+            return
+        }
+        viewModelScope.launch {
+            _isTunnelTestRunning.value = true
+            try {
+                _tunnelConnectivity.value = com.example.vpn.diagnostics.NetworkDiagnostics.testTunnelConnectivity()
+            } finally {
+                _isTunnelTestRunning.value = false
+            }
+        }
+    }
 
     fun clearLogs() {
         XrayLogManager.clear()
@@ -108,7 +134,13 @@ class DiagnosticsViewModel(
             "No active server connected"
         }
 
-        val engineName = if (conn.isVpnInterfaceActive) "Maximus Kotlin TunnelManager" else "Inactive"
+        val selectedEngine = conn.activeEngineName.orEmpty()
+        val engineName = when {
+            !conn.isVpnInterfaceActive -> "Inactive"
+            selectedEngine.startsWith("Xray-core via XTLS/libXray") -> "Xray-core (native libXray)"
+            selectedEngine.isNotBlank() -> selectedEngine
+            else -> "Unknown (engine not recorded)"
+        }
         val protocolName = profile?.protocolType?.displayName ?: "None"
 
         return DiagnosticReport(
@@ -122,11 +154,12 @@ class DiagnosticsViewModel(
             dohWorking = null,
             dnsLeakDetected = null,
             resolverIp = null,
-            networkType = if (conn.isVpnInterfaceActive) "Android TUN (${conn.vpnIp ?: "unknown"}); end-to-end connectivity not tested" else "Direct Interface",
+            networkType = if (conn.isVpnInterfaceActive) "Android TUN (${conn.vpnIp ?: "unknown"})" else "Direct Interface",
             lastLatencyMs = conn.pingMs,
             connectionState = conn.status.name,
             sanitizedLogs = XrayLogManager.getLogs(),
-            lastError = conn.errorMessage
+            lastError = conn.errorMessage,
+            tunnelConnectivity = _tunnelConnectivity.value
         )
     }
 
@@ -143,7 +176,7 @@ class DiagnosticsViewModel(
         sb.appendLine("VPN Service Status: ${if (report.vpnServiceRunning) "ACTIVE (TUN ESTABLISHED)" else "INACTIVE"}")
         sb.appendLine("Active Core Engine: ${report.activeEngine}")
         sb.appendLine("Active Protocol: ${report.activeProtocol}")
-        sb.appendLine("Native Engine: Not integrated; forwarding uses Kotlin")
+        sb.appendLine("Native Engine: ${if (report.activeEngine.startsWith("Xray-core")) "XTLS/libXray; attached to Android TUN" else "Not active for this connection"}")
         sb.appendLine("Connection State: ${report.connectionState}")
         sb.appendLine("Active Server: ${report.activeServerSummary}")
         sb.appendLine("Configured Routing Mode: ${report.routingMode}")
@@ -151,6 +184,13 @@ class DiagnosticsViewModel(
         sb.appendLine("DoH Runtime Verification: ${report.dohWorking?.toString() ?: "Not measured"}")
         sb.appendLine("DNS Leak Test: ${report.dnsLeakDetected?.toString() ?: "Not performed"}")
         sb.appendLine("Network Type: ${report.networkType}")
+        val tunnelTest = report.tunnelConnectivity
+        val tunnelTestText = when {
+            tunnelTest == null -> "Not performed"
+            tunnelTest.reachable -> "PASS (HTTP ${tunnelTest.httpStatus}, ${tunnelTest.latencyMs}ms via ${tunnelTest.endpoint})"
+            else -> "FAIL (${tunnelTest.errorMessage ?: "no response"})"
+        }
+        sb.appendLine("End-to-End Tunnel Test: $tunnelTestText")
         sb.appendLine("Latency: ${report.lastLatencyMs?.let { "${it}ms" } ?: "N/A"}")
         if (report.lastError != null) {
             sb.appendLine("Last Error Reported: ${report.lastError}")
