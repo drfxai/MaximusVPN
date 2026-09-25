@@ -523,7 +523,7 @@ fun AddServerScreen(
 
             OutlinedCustomField("Flow (e.g. xtls-rprx-vision)", advFlow) { advFlow = it }
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedCustomField("Fingerprint (e.g. chrome, firefox, unsafe)", advFingerprint) { advFingerprint = it }
+            OutlinedCustomField("Fingerprint (e.g. chrome, firefox)", advFingerprint) { advFingerprint = it }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedCustomField("Cipher Suites (optional colon/comma separated)", advCipherSuites) { advCipherSuites = it }
             Spacer(modifier = Modifier.height(8.dp))

@@ -96,6 +96,7 @@ data class UdpHeader(
             if (offset < 0 || totalPacketLength > buffer.size || offset > totalPacketLength - 8) return null
             val srcPort = ((buffer[offset].toInt() and 0xFF) shl 8) or (buffer[offset + 1].toInt() and 0xFF)
             val dstPort = ((buffer[offset + 2].toInt() and 0xFF) shl 8) or (buffer[offset + 3].toInt() and 0xFF)
+            if (srcPort == 0 || dstPort == 0) return null
             val length = ((buffer[offset + 4].toInt() and 0xFF) shl 8) or (buffer[offset + 5].toInt() and 0xFF)
             val checksum = ((buffer[offset + 6].toInt() and 0xFF) shl 8) or (buffer[offset + 7].toInt() and 0xFF)
 
@@ -135,6 +136,7 @@ data class TcpHeader(
 
             val srcPort = ((buffer[offset].toInt() and 0xFF) shl 8) or (buffer[offset + 1].toInt() and 0xFF)
             val dstPort = ((buffer[offset + 2].toInt() and 0xFF) shl 8) or (buffer[offset + 3].toInt() and 0xFF)
+            if (srcPort == 0 || dstPort == 0) return null
 
             val seq = ((buffer[offset + 4].toLong() and 0xFF) shl 24) or
                     ((buffer[offset + 5].toLong() and 0xFF) shl 16) or
@@ -187,6 +189,9 @@ object PacketBuilder {
         dstPort: Int,
         payload: ByteArray
     ): ByteArray {
+        require(srcIp.size == 4 && dstIp.size == 4) { "UDP packet builder requires IPv4 addresses" }
+        require(srcPort in 1..65535 && dstPort in 1..65535) { "UDP port is out of range" }
+        require(payload.size <= 65507) { "UDP payload exceeds the IPv4 datagram limit" }
         val ipHeaderLen = 20
         val udpHeaderLen = 8
         val totalLength = ipHeaderLen + udpHeaderLen + payload.size
@@ -302,6 +307,9 @@ object PacketBuilder {
         windowSize: Int = 65535,
         payload: ByteArray = ByteArray(0)
     ): ByteArray {
+        require(srcIp.size == 4 && dstIp.size == 4) { "TCP packet builder requires IPv4 addresses" }
+        require(srcPort in 1..65535 && dstPort in 1..65535) { "TCP port is out of range" }
+        require(payload.size <= 65495) { "TCP payload exceeds the IPv4 packet limit" }
         val ipHeaderLen = 20
         val tcpHeaderLen = 20
         val totalLength = ipHeaderLen + tcpHeaderLen + payload.size

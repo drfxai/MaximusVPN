@@ -75,6 +75,8 @@ class RayApplication : Application() {
         // Clean up legacy non-functional seed nodes and initialize profile state
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                subscriptionRepository.migrateSensitiveUrls()
+                serverRepository.migrateSensitiveSubscriptionSources()
                 serverRepository.delete("seed-vless-ws-1")
                 serverRepository.delete("seed-vless-reality-1")
 

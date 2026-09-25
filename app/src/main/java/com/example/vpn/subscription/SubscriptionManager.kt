@@ -10,9 +10,9 @@ import com.example.xray.XrayLogManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
@@ -22,6 +22,17 @@ class SubscriptionManager(
     private val serverRepository: ServerRepository
 ) {
     companion object {
+        private const val MAX_SAFE_REDIRECTS = 5
+
+        internal fun validateRedirectTarget(base: HttpUrl, location: String): HttpUrl {
+            val target = base.resolve(location)
+                ?: throw SecurityException("SSRF blocked: Invalid subscription redirect target")
+            if (!isValidSubscriptionUrl(target.toString())) {
+                throw SecurityException("SSRF blocked: Subscription redirect target is restricted")
+            }
+            return target
+        }
+
         fun isValidSubscriptionUrl(url: String): Boolean {
             val trimmed = url.trim()
             return try {
@@ -112,23 +123,25 @@ class SubscriptionManager(
         }
     }
 
-    private val redirectValidationInterceptor = Interceptor { chain ->
-        val request = chain.request()
-        val uri = request.url.toUri()
-        val scheme = uri.scheme?.lowercase()
-        if (scheme != "https") {
-            throw SecurityException("SSRF blocked: Subscriptions must strictly use HTTPS.")
-        }
-        val host = uri.host ?: throw IllegalArgumentException("Missing host in subscription URL")
-        if (isBlockedHost(host)) {
-            throw SecurityException("SSRF blocked: Subscription target is a restricted local or metadata host: $host")
-        }
-        val response = chain.proceed(request)
-        if (response.isRedirect) {
-            val location = response.header("Location")
-            if (location != null && !isValidSubscriptionUrl(location)) {
-                throw SecurityException("SSRF blocked: Redirected to disallowed destination: $location")
+    private val safeRedirectInterceptor = Interceptor { chain ->
+        var request = chain.request()
+        var response = chain.proceed(request)
+        var redirects = 0
+        while (response.isRedirect) {
+            if (redirects++ >= MAX_SAFE_REDIRECTS) {
+                response.close()
+                throw java.io.IOException("Subscription redirected too many times")
             }
+            val location = response.header("Location") ?: return@Interceptor response
+            val target = try {
+                validateRedirectTarget(response.request.url, location)
+            } catch (e: Exception) {
+                response.close()
+                throw e
+            }
+            request = response.request.newBuilder().url(target).build()
+            response.close()
+            response = chain.proceed(request)
         }
         response
     }
@@ -137,9 +150,10 @@ class SubscriptionManager(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .dns(safeDns)
-        .addInterceptor(redirectValidationInterceptor)
-        .followRedirects(true)
-        .followSslRedirects(true)
+        // Validate redirect destinations before opening their sockets.
+        .addInterceptor(safeRedirectInterceptor)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     data class SyncResult(

@@ -6,7 +6,6 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import androidx.annotation.RequiresApi
 import com.example.MainActivity
 import com.example.R
 import com.example.data.database.AppDatabase
@@ -21,7 +20,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-@RequiresApi(Build.VERSION_CODES.N)
 class VpnTileService : TileService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main)

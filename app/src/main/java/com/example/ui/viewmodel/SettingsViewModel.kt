@@ -86,7 +86,7 @@ class SettingsViewModel(
 
     fun setIpv6(enabled: Boolean) {
         val current = settingsRepository.getSettings()
-        XrayLogManager.i("SETTINGS", "IPv6 routing updated: $enabled")
+        XrayLogManager.i("SETTINGS", "IPv6 leak blocking updated: $enabled")
         settingsRepository.updateSettings(current.copy(ipv6Enabled = enabled))
     }
 

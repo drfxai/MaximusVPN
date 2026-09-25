@@ -75,7 +75,13 @@ data class ServerProfileEntity(
     val proxyGroupName: String? = null,
     val nodeCount: Int = 1
 ) {
-    fun toDomain(): VlessProfile = VlessProfile(
+    fun toDomain(): VlessProfile {
+        val decryptedSubscriptionUrl = subscriptionUrl?.let {
+            if (it.isNotEmpty()) SecureStorage.decrypt(it).ifBlank { null } else null
+        }
+        val legacySourceUrl = sourceSubscription?.takeUnless { it.startsWith("sha256:") }
+        val originalSourceUrl = decryptedSubscriptionUrl ?: legacySourceUrl
+        return VlessProfile(
         id = id,
         canonicalFingerprint = canonicalFingerprint,
         name = name,
@@ -124,12 +130,13 @@ data class ServerProfileEntity(
         protocolType = try { ProtocolType.valueOf(protocolType) } catch (_: Exception) { ProtocolType.VLESS },
         engineType = try { EngineType.valueOf(engineType) } catch (_: Exception) { EngineType.XRAY },
         rawConfig = if (rawConfig.isNotEmpty()) SecureStorage.decrypt(rawConfig) else "",
-        subscriptionUrl = subscriptionUrl?.let { if (it.isNotEmpty()) SecureStorage.decrypt(it) else it },
-        sourceSubscription = sourceSubscription,
+        subscriptionUrl = originalSourceUrl,
+        sourceSubscription = originalSourceUrl,
         sourceFile = sourceFile,
         proxyGroupName = proxyGroupName,
         nodeCount = nodeCount
-    )
+        )
+    }
 
     companion object {
         fun fromDomain(p: VlessProfile): ServerProfileEntity = ServerProfileEntity(
@@ -181,12 +188,15 @@ data class ServerProfileEntity(
             protocolType = p.protocolType.name,
             engineType = p.engineType.name,
             rawConfig = if (p.rawConfig.isNotEmpty()) SecureStorage.encrypt(p.rawConfig) else "",
-            subscriptionUrl = p.subscriptionUrl?.let { if (it.isNotEmpty()) SecureStorage.encrypt(it) else it },
-            sourceSubscription = p.sourceSubscription,
+            subscriptionUrl = (p.sourceSubscription ?: p.subscriptionUrl)?.let {
+                if (it.isNotEmpty()) SecureStorage.encrypt(it) else it
+            },
+            sourceSubscription = (p.sourceSubscription ?: p.subscriptionUrl)?.let {
+                if (it.isNotEmpty()) CanonicalFingerprint.computeSubscriptionKey(it) else it
+            },
             sourceFile = p.sourceFile,
             proxyGroupName = p.proxyGroupName,
             nodeCount = p.nodeCount
         )
     }
 }
-

@@ -25,14 +25,11 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
-import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 class TcpVlessTunnel(
     private val scope: CoroutineScope,
@@ -329,20 +326,13 @@ class TcpVlessTunnel(
                     }
                 }
                 ProtocolType.SOCKS5 -> {
-                    performSocks5Handshake(inStream, outStream, destIpStr, destPort)
+                    UpstreamProtocol.performSocks5Connect(inStream, outStream, destIpStr, destPort)
                 }
                 ProtocolType.HTTP -> {
                     val httpConnect = "CONNECT $destIpStr:$destPort HTTP/1.1\r\nHost: $destIpStr:$destPort\r\n\r\n"
                     outStream.write(httpConnect.toByteArray(Charsets.UTF_8))
                     outStream.flush()
-                    val responseLine = readHttpLine(inStream)
-                    if (!responseLine.contains("200")) {
-                        throw IllegalStateException("HTTP CONNECT proxy failed: $responseLine")
-                    }
-                    while (true) {
-                        val line = readHttpLine(inStream)
-                        if (line.isEmpty() || line == "\r") break
-                    }
+                    UpstreamProtocol.validateHttpConnectResponse(inStream)
                 }
                 else -> error("Unsupported proxy protocol")
             }
@@ -380,9 +370,11 @@ class TcpVlessTunnel(
     }
 
     private fun configureTlsSocket(rawSocket: Socket, profile: VlessProfile): SSLSocket {
-        val isReality = profile.security.equals("reality", ignoreCase = true)
-        if (isReality && profile.publicKey.isBlank()) {
-            throw javax.net.ssl.SSLException("REALITY Security Failure: Public key (pbk) is missing for REALITY profile '${profile.name}'")
+        if (!profile.security.equals("tls", ignoreCase = true)) {
+            throw javax.net.ssl.SSLException("Only standard TLS is supported by the embedded tunnel")
+        }
+        if (profile.fingerprint.equals("unsafe", ignoreCase = true)) {
+            throw javax.net.ssl.SSLException("TLS certificate verification cannot be disabled")
         }
 
         val sniHost = if (profile.sni.isNotBlank()) {
@@ -393,49 +385,7 @@ class TcpVlessTunnel(
             profile.address
         }
 
-        val isUnsafe = profile.fingerprint.equals("unsafe", ignoreCase = true)
-        if (isUnsafe && !com.example.BuildConfig.DEBUG) {
-            throw javax.net.ssl.SSLException("Unsafe TLS is disabled in release builds")
-        }
-        val sslContext: SSLContext
-        if (isReality) {
-            // For REALITY: Strict peer certificate verification against server public key / fingerprint
-            val realityTrustManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-                    RealityVerifier.verifyRealityPeer(chain, profile.publicKey)
-                }
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            }
-            sslContext = try {
-                SSLContext.getInstance("TLSv1.3").apply {
-                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
-                }
-            } catch (_: Exception) {
-                SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
-                }
-            }
-        } else if (isUnsafe) {
-            val trustAllManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            }
-            sslContext = try {
-                SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(trustAllManager), java.security.SecureRandom())
-                }
-            } catch (_: Exception) {
-                SSLContext.getDefault()
-            }
-        } else {
-            sslContext = try {
-                SSLContext.getInstance("TLS").apply { init(null, null, java.security.SecureRandom()) }
-            } catch (_: Exception) {
-                SSLContext.getDefault()
-            }
-        }
+        val sslContext = SSLContext.getDefault()
 
         val sslSocket = sslContext.socketFactory.createSocket(
             rawSocket,
@@ -445,7 +395,7 @@ class TcpVlessTunnel(
         ) as SSLSocket
 
         val params = SSLParameters()
-        if (!isReality && !isUnsafe) params.endpointIdentificationAlgorithm = "HTTPS"
+        params.endpointIdentificationAlgorithm = "HTTPS"
         if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
             params.serverNames = listOf(javax.net.ssl.SNIHostName(sniHost))
         }
@@ -509,77 +459,6 @@ class TcpVlessTunnel(
         out.write(destPort and 0xFF)
         out.write("\r\n".toByteArray(Charsets.US_ASCII))
         return out.toByteArray()
-    }
-
-    private fun performSocks5Handshake(
-        inStream: InputStream,
-        outStream: OutputStream,
-        destIp: String,
-        destPort: Int
-    ) {
-        outStream.write(byteArrayOf(0x05, 0x01, 0x00))
-        outStream.flush()
-
-        val resp = ByteArray(2)
-        readExact(inStream, resp, 2)
-        if (resp[0] != 0x05.toByte() || resp[1] != 0x00.toByte()) {
-            throw IllegalStateException("SOCKS5 server authentication negotiation failed")
-        }
-
-        val out = java.io.ByteArrayOutputStream()
-        out.write(0x05)
-        out.write(0x01)
-        out.write(0x00)
-
-        val ipBytes = RoutingEngine.parseIpv4(destIp)
-        if (ipBytes != null) {
-            out.write(0x01)
-            out.write(ipBytes)
-        } else {
-            out.write(0x03)
-            val domainBytes = destIp.toByteArray(Charsets.UTF_8)
-            out.write(domainBytes.size)
-            out.write(domainBytes)
-        }
-        out.write((destPort shr 8) and 0xFF)
-        out.write(destPort and 0xFF)
-
-        outStream.write(out.toByteArray())
-        outStream.flush()
-
-        val replyHeader = ByteArray(4)
-        readExact(inStream, replyHeader, 4)
-        if (replyHeader[1] != 0x00.toByte()) {
-            throw IllegalStateException("SOCKS5 connect error code: ${replyHeader[1]}")
-        }
-        when (replyHeader[3].toInt() and 0xFF) {
-            1 -> readExact(inStream, ByteArray(4 + 2), 6)
-            3 -> {
-                val len = inStream.read()
-                readExact(inStream, ByteArray(len + 2), len + 2)
-            }
-            4 -> readExact(inStream, ByteArray(16 + 2), 18)
-        }
-    }
-
-    private fun readExact(stream: InputStream, buffer: ByteArray, length: Int) {
-        var total = 0
-        while (total < length) {
-            val read = stream.read(buffer, total, length - total)
-            if (read == -1) throw java.io.EOFException("Unexpected EOF from upstream proxy")
-            total += read
-        }
-    }
-
-    private fun readHttpLine(inputStream: InputStream): String {
-        val sb = StringBuilder()
-        var c: Int
-        while (inputStream.read().also { c = it } != -1) {
-            if (c == '\n'.code) break
-            if (c != '\r'.code) sb.append(c.toChar())
-            if (sb.length > 2048) break
-        }
-        return sb.toString()
     }
 
     private fun startPumping(session: TcpSession) {

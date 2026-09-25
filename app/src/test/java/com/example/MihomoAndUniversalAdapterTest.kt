@@ -19,6 +19,13 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class MihomoAndUniversalAdapterTest {
 
+    @Test
+    fun oversizedMihomoYamlIsRejectedBeforeParsing() {
+        val config = MihomoParser.parseYaml("a".repeat(2_000_001))
+        assertTrue(config.proxies.isEmpty())
+        assertTrue(config.rawYaml.isEmpty())
+    }
+
     private val sampleMihomoYaml = """
         port: 7890
         socks-port: 7891

@@ -17,7 +17,19 @@ class SubscriptionRepository(private val dao: SubscriptionDao) {
     }
 
     suspend fun getSubscriptionByUrl(url: String): SubscriptionInfo? {
-        return dao.getSubscriptionByUrl(url)?.toDomain()
+        return dao.getAllSubscriptionsOnce().asSequence().map { it.toDomain() }.firstOrNull { it.url == url }
+    }
+
+    /** Rewrites legacy plaintext subscription URLs using the current encrypted representation. */
+    suspend fun migrateSensitiveUrls() {
+        dao.getAllSubscriptionsOnce()
+            .filter { it.url.startsWith("https://", ignoreCase = true) }
+            .forEach { entity ->
+                val domain = entity.toDomain()
+                if (domain.url.isNotBlank()) {
+                    dao.insert(SubscriptionEntity.fromDomain(domain, entity.etag, entity.lastModified))
+                }
+            }
     }
 
     suspend fun insertOrUpdate(subscription: SubscriptionInfo, etag: String? = null, lastModified: String? = null) {

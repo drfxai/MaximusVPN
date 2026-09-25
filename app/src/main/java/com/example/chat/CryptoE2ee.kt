@@ -1,6 +1,5 @@
 package com.example.chat
 
-import com.example.data.security.SecureStorage
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -11,14 +10,9 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * End-to-End Encryption (E2EE) & 20-digit Atomic ID cryptographic primitives.
- *
- * Implements:
- * 1. 20-digit Atomic ID generation with Luhn-style weighted checksum.
- * 2. Forward-Secret Ratchet Key Derivation (HKDF-HMAC-SHA256) for session forward secrecy.
- * 3. AES-256-GCM message encryption with randomized IV and 128-bit authentication tag.
- * 4. In-memory zeroization of ephemeral keys and plaintext buffers upon completion.
- * 5. Panic Nuke cryptographic memory & storage wiping.
+ * Experimental local cryptographic helpers. These do not constitute E2EE: no authenticated
+ * key exchange or peer transport is implemented, and the deterministic message-key derivation
+ * does not provide forward secrecy.
  */
 object CryptoE2ee {
 
@@ -83,9 +77,7 @@ object CryptoE2ee {
         return "$c1$c2"
     }
 
-    /**
-     * Derives a 256-bit AES symmetric root key between two Atomic IDs using HKDF-SHA256.
-     */
+    /** Derives a deterministic test key from two identifiers; unsuitable as a shared secret. */
     fun deriveSharedKey(myAtomicId: String, peerAtomicId: String): SecretKey {
         val sortedPair = listOf(myAtomicId.replace("-", ""), peerAtomicId.replace("-", "")).sorted()
         val seed = "MAXIMUS_E2EE_PFS_V3_ROOT:${sortedPair[0]}:${sortedPair[1]}".toByteArray(Charsets.UTF_8)
@@ -96,10 +88,7 @@ object CryptoE2ee {
         return key
     }
 
-    /**
-     * Derives a forward-secret ephemeral message key using an HMAC-SHA256 ratchet step.
-     * Prevents compromise of future/past messages even if a single message key is leaked.
-     */
+    /** Derives an indexed test key; this is not a stateful forward-secret ratchet. */
     fun deriveRatchetMessageKey(rootKey: SecretKey, messageIndex: Long): SecretKey {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(rootKey.encoded, "HmacSHA256"))

@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.raytunnel.vpnrx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 5
-    versionName = "1.0.4"
+    versionCode = 6
+    versionName = "1.0.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -61,7 +61,7 @@ android {
   lint {
     checkReleaseBuilds = true
     abortOnError = true
-    disable.addAll(listOf("InvalidFragmentVersionForActivityResult", "UnusedMaterial3ScaffoldPaddingParameter"))
+    disable.add("InvalidFragmentVersionForActivityResult")
   }
 
   testOptions { unitTests { isIncludeAndroidResources = true } }

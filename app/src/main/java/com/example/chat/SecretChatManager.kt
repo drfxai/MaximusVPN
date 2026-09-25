@@ -16,10 +16,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * GOD MODE: Secret E2EE Chat Manager with 20-digit Atomic IDs, Android Keystore protection,
- * local-first encrypted storage, and auto-shredding.
- */
+/** Local contact/message prototype. Authenticated peer transport is intentionally disabled. */
 class SecretChatManager(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("maximus_secret_chat_enc", Context.MODE_PRIVATE)
@@ -173,9 +170,7 @@ class SecretChatManager(private val context: Context) {
         persistConversations()
     }
 
-    /**
-     * Complete cryptographic shredding of all conversations, keys, and memory records.
-     */
+    /** Removes locally stored contact and in-memory message records. */
     fun nukeAllChats() {
         conversationsMap.clear()
         messagesMap.values.forEach { it.clear() }
@@ -186,9 +181,7 @@ class SecretChatManager(private val context: Context) {
         prefs.edit().remove("enc_conversations").apply()
     }
 
-    /**
-     * Periodic background shredder: Purges expired ephemeral messages from memory.
-     */
+    /** Periodically removes expired prototype messages from the in-memory list. */
     private fun startMessageReaper() {
         reaperJob?.cancel()
         reaperJob = scope.launch {

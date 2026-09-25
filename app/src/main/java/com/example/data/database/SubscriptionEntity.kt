@@ -3,6 +3,7 @@ package com.example.data.database
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.example.data.model.SubscriptionInfo
+import com.example.data.security.SecureStorage
 
 @Entity(tableName = "subscriptions")
 data class SubscriptionEntity(
@@ -20,7 +21,10 @@ data class SubscriptionEntity(
     fun toDomain(): SubscriptionInfo = SubscriptionInfo(
         id = id,
         name = name,
-        url = url,
+        url = SecureStorage.decrypt(url).ifBlank {
+            // Backward compatibility for databases written before URLs were encrypted.
+            if (url.startsWith("https://", ignoreCase = true)) url else ""
+        },
         lastUpdated = lastUpdated,
         autoRefresh = autoRefresh,
         refreshIntervalMinutes = refreshIntervalMinutes,
@@ -33,7 +37,7 @@ data class SubscriptionEntity(
             SubscriptionEntity(
                 id = sub.id,
                 name = sub.name,
-                url = sub.url,
+                url = if (sub.url.isNotEmpty()) SecureStorage.encrypt(sub.url) else "",
                 lastUpdated = sub.lastUpdated,
                 autoRefresh = sub.autoRefresh,
                 refreshIntervalMinutes = sub.refreshIntervalMinutes,
