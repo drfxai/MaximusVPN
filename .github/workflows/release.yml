@@ -70,7 +70,7 @@ jobs:
           target: google_apis
           disable-animations: true
           script: |
-            curl --fail --location --retry 3 -o previous.apk https://github.com/drfxai/MaximusVPN/releases/download/v1.0.2/app-release.apk
+            curl --fail --location --retry 3 -o previous.apk https://github.com/drfxai/MaximusVPN/releases/download/v1.0.3/app-release.apk
             bash scripts/install-smoke.sh previous.apk
             bash scripts/install-smoke.sh app-release.apk
             if adb shell getprop ro.product.cpu.abilist | grep -q arm64-v8a; then bash scripts/install-smoke.sh arm64-v8a.apk; else echo "ARM64 install requires a physical ARM64 device"; fi

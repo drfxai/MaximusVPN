@@ -51,10 +51,10 @@ class DoHClient(
                 }
                 override fun createSocket(host: String?, port: Int, localHost: java.net.InetAddress?, localPort: Int): Socket {
                     val socket = defaultFactory.createSocket()
-                    protectOrThrow(socket)
                     if (localHost != null) {
                         socket.bind(InetSocketAddress(localHost, localPort))
                     }
+                    protectOrThrow(socket)
                     if (host != null) {
                         socket.connect(InetSocketAddress(host, port))
                     }
@@ -70,10 +70,10 @@ class DoHClient(
                 }
                 override fun createSocket(address: java.net.InetAddress?, port: Int, localAddress: java.net.InetAddress?, localPort: Int): Socket {
                     val socket = defaultFactory.createSocket()
-                    protectOrThrow(socket)
                     if (localAddress != null) {
                         socket.bind(InetSocketAddress(localAddress, localPort))
                     }
+                    protectOrThrow(socket)
                     if (address != null) {
                         socket.connect(InetSocketAddress(address, port))
                     }

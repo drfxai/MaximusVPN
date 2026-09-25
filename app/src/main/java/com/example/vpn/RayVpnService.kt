@@ -85,6 +85,7 @@ class RayVpnService : VpnService() {
     private var failoverManager: com.example.vpn.smart.FailoverManager? = null
     private val serviceTxBytes = java.util.concurrent.atomic.AtomicLong(0)
     private val serviceRxBytes = java.util.concurrent.atomic.AtomicLong(0)
+    private val protectionFailureHandled = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private lateinit var serverRepository: ServerRepository
     private lateinit var settingsRepository: SettingsRepository
@@ -228,6 +229,7 @@ class RayVpnService : VpnService() {
     private suspend fun connectLocked(profile: VlessProfile): Unit = withContext(Dispatchers.IO) {
         try {
             disconnectResources()
+            protectionFailureHandled.set(false)
 
             // 1. Diagnostic step 1: Validate Android VPN permission
             val prepareIntent = VpnService.prepare(this@RayVpnService)
@@ -362,6 +364,13 @@ class RayVpnService : VpnService() {
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 5. Builder.establish() returned non-null ParcelFileDescriptor.")
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 6. TUN file descriptor number: #${pfd.fd}.")
 
+            Socket().use { probe ->
+                check(safeProtectSocket(probe)) {
+                    "Android rejected VPN socket protection; VPN forwarding cannot start. Check VPN permission."
+                }
+            }
+            XrayLogManager.i("VPN", "[DIAGNOSTICS] Upstream TCP socket protection probe succeeded.")
+
             // 6. Update Connection State to VPN_INTERFACE_ESTABLISHED
             serviceTxBytes.set(0)
             serviceRxBytes.set(0)
@@ -442,7 +451,22 @@ class RayVpnService : VpnService() {
                     }
                 },
                 onTunnelError = { reason ->
-                    failoverManager?.reportTunnelError(reason)
+                    if (reason.contains("socket protection failed", ignoreCase = true)) {
+                        if (protectionFailureHandled.compareAndSet(false, true)) {
+                            serviceScope.launch {
+                                XrayLogManager.e("VPN", "Android rejected upstream socket protection. Closing VPN instead of switching servers.")
+                                updateState(_vpnState.value.copy(
+                                    status = ConnectionStatus.FAILED,
+                                    errorMessage = "Android rejected upstream socket protection. Re-enable VPN permission and reconnect."
+                                ))
+                                disconnectResources()
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                                stopSelf()
+                            }
+                        }
+                    } else {
+                        failoverManager?.reportTunnelError(reason)
+                    }
                 }
             )
             tunnelManager?.start()
@@ -453,8 +477,7 @@ class RayVpnService : VpnService() {
                 return@withContext
             }
 
-            // 9. Socket protection verified (app excluded via addDisallowedApplication & VpnService.protect)
-            XrayLogManager.i("VPN", "[DIAGNOSTICS] 9. Upstream socket protection confirmed (disallowed UID & VpnService.protect).")
+            XrayLogManager.i("VPN", "[DIAGNOSTICS] 9. Upstream socket protection probe passed.")
 
             // 10. Update Connection State to CONNECTED
             val startTime = System.currentTimeMillis()
@@ -513,9 +536,9 @@ class RayVpnService : VpnService() {
 
     private fun safeProtectSocket(socket: Socket): Boolean {
         try {
-            return protect(socket)
+            return protectTcpSocket(socket) { protect(it) }
         } catch (e: Exception) {
-            XrayLogManager.d("SOCKET", "protect(Socket) exception: ${e.message}")
+            XrayLogManager.w("SOCKET", "Unable to prepare or protect TCP socket: ${e.message}")
         }
         return false
     }
@@ -565,7 +588,7 @@ class RayVpnService : VpnService() {
             while (isActive && _vpnState.value.isConnected) {
                 try {
                     val socket = Socket()
-                    safeProtectSocket(socket)
+                    check(safeProtectSocket(socket)) { "VPN socket protection failed" }
                     val sStart = System.currentTimeMillis()
                     socket.connect(InetSocketAddress(profile.address, profile.port), 3000)
                     val latency = System.currentTimeMillis() - sStart

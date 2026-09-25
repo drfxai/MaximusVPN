@@ -43,6 +43,10 @@ Diagnostics display the build version and Kotlin forwarding runtime. Native Xray
 To publish without the manual Actions form, update the app version and `release-version.txt` together in a reviewed change to `main`. A change to that file starts the same signed release workflow; use a new tag each time. Release assets include `arm64-v8a.apk`, `app-release.apk`, `SHA256SUMS`, and GitHub's source archives.
 
 
+## v1.0.4 device diagnostics fix
+
+The Samsung Android 15 report for v1.0.3 showed that TUN establishment succeeded while all outbound TCP and DoH sockets failed Android `VpnService.protect()`. New TCP sockets now bind before protection so they have a usable file descriptor, and a protection probe must pass before the app reports `CONNECTED`. A later protection failure stops forwarding with an error instead of rotating servers. Failover ignores duplicate imports and the current server endpoint, and its cooldown survives reconnects. Release automation checks installation over v1.0.3; a physical ARM64 traffic test is still needed to confirm the device result.
+
 ## v1.0.3 review and validation
 
 This release builds standalone ARM64 and universal APKs with extracted native libraries. Both keep the same application ID and signing key. Android 15 CI checks installation and startup. The release workflow checks upgrading from the signed v1.0.2 universal APK; it also tests the ARM64 APK when the emulator advertises ARM64 translation. Physical Samsung installation remains a separate device check.
