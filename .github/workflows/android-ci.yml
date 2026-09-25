@@ -25,6 +25,8 @@ jobs:
           test -n "$SDKMANAGER"
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           "$SDKMANAGER" 'platforms;android-36.1' 'build-tools;36.0.0'
+      - name: Fetch verified native Xray runtime
+        run: bash scripts/fetch-libxray-android.sh
       - name: Test and build debug APK
         run: bash gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
       - name: Check release lint
