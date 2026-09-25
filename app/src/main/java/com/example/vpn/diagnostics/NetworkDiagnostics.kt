@@ -37,7 +37,57 @@ data class DnsLeakResult(
     val dnsResolver: String
 )
 
+data class TunnelConnectivityResult(
+    val reachable: Boolean,
+    val endpoint: String? = null,
+    val httpStatus: Int? = null,
+    val latencyMs: Long? = null,
+    val errorMessage: String? = null
+)
+
 object NetworkDiagnostics {
+
+    /**
+     * Makes a normal app HTTPS request. It deliberately does not protect/bind the socket,
+     * so Android routes it through the active VPN and the result verifies end-to-end traffic.
+     */
+    suspend fun testTunnelConnectivity(timeoutMs: Int = 5000): TunnelConnectivityResult = withContext(Dispatchers.IO) {
+        val endpoints = listOf(
+            "https://connectivitycheck.gstatic.com/generate_204",
+            "https://cp.cloudflare.com/generate_204"
+        )
+        var lastError = "No connectivity probe completed"
+        for (endpoint in endpoints) {
+            var connection: HttpURLConnection? = null
+            try {
+                val startedAt = System.nanoTime()
+                connection = URL(endpoint).openConnection() as HttpURLConnection
+                connection.connectTimeout = timeoutMs
+                connection.readTimeout = timeoutMs
+                connection.requestMethod = "GET"
+                connection.instanceFollowRedirects = false
+                connection.useCaches = false
+                connection.setRequestProperty("Cache-Control", "no-cache")
+                val status = connection.responseCode
+                val elapsedMs = ((System.nanoTime() - startedAt) / 1_000_000).coerceAtLeast(1)
+                if (status in 200..299) {
+                    return@withContext TunnelConnectivityResult(
+                        reachable = true,
+                        endpoint = endpoint,
+                        httpStatus = status,
+                        latencyMs = elapsedMs
+                    )
+                }
+                lastError = "Probe returned HTTP $status"
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                lastError = e.localizedMessage ?: e.javaClass.simpleName
+            } finally {
+                connection?.disconnect()
+            }
+        }
+        TunnelConnectivityResult(reachable = false, errorMessage = lastError)
+    }
 
     /**
      * Conducts a detailed TCP and TLS handshake test against the server node.
