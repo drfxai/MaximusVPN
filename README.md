@@ -47,9 +47,9 @@ To publish without the manual Actions form, update the app version and `release-
 
 The Samsung Android 15 report for v1.0.3 showed that TUN establishment succeeded while all outbound TCP and DoH sockets failed Android `VpnService.protect()`. New TCP sockets now bind before protection so they have a usable file descriptor, and a protection probe must pass before the app reports `CONNECTED`. A later protection failure stops forwarding with an error instead of rotating servers. Failover ignores duplicate imports and the current server endpoint, and its cooldown survives reconnects. Release automation checks installation over v1.0.3; a physical ARM64 traffic test is still needed to confirm the device result.
 
-## v1.0.5 source update
+## v1.0.6 end-to-end connectivity diagnostics
 
-This release tightens VLESS, HTTP CONNECT, SOCKS5, TLS, subscription redirect, and packet validation; protects subscription URLs at rest; and updates database migration and lookup paths. The app now routes its own browser traffic through the active VPN, labels IPv6 controls as leak blocking, and describes chat as a local contact preview because authenticated peer messaging is not implemented. Release automation verifies upgrade from v1.0.4.
+The diagnostics screen can now make a real HTTPS request through Android's active VPN route. The result and measured latency are included in exported diagnostic reports. This separates TUN setup and server-port reachability from verified internet traffic. A failed probe can still reflect endpoint filtering, so the report records the failed endpoint response for troubleshooting.
 
 ## v1.0.3 review and validation
 
