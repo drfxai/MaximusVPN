@@ -13,6 +13,8 @@ import com.example.xray.XrayLogManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,6 +37,30 @@ class DiagnosticsViewModel(
 
     private val _subsystemHealth = MutableStateFlow(SubsystemHealth())
     val subsystemHealth: StateFlow<SubsystemHealth> = _subsystemHealth.asStateFlow()
+
+    private val _tunnelConnectivity = MutableStateFlow<com.example.vpn.diagnostics.TunnelConnectivityResult?>(null)
+    val tunnelConnectivity: StateFlow<com.example.vpn.diagnostics.TunnelConnectivityResult?> = _tunnelConnectivity.asStateFlow()
+    private val _isTunnelTestRunning = MutableStateFlow(false)
+    val isTunnelTestRunning: StateFlow<Boolean> = _isTunnelTestRunning.asStateFlow()
+
+    fun testTunnelConnectivity() {
+        if (_isTunnelTestRunning.value) return
+        if (!connectionState.value.isVpnInterfaceActive) {
+            _tunnelConnectivity.value = com.example.vpn.diagnostics.TunnelConnectivityResult(
+                reachable = false,
+                errorMessage = "Connect the VPN before testing tunneled internet access."
+            )
+            return
+        }
+        viewModelScope.launch {
+            _isTunnelTestRunning.value = true
+            try {
+                _tunnelConnectivity.value = com.example.vpn.diagnostics.NetworkDiagnostics.testTunnelConnectivity()
+            } finally {
+                _isTunnelTestRunning.value = false
+            }
+        }
+    }
 
     fun clearLogs() {
         XrayLogManager.clear()
@@ -122,11 +148,12 @@ class DiagnosticsViewModel(
             dohWorking = null,
             dnsLeakDetected = null,
             resolverIp = null,
-            networkType = if (conn.isVpnInterfaceActive) "Android TUN (${conn.vpnIp ?: "unknown"}); end-to-end connectivity not tested" else "Direct Interface",
+            networkType = if (conn.isVpnInterfaceActive) "Android TUN (${conn.vpnIp ?: "unknown"})" else "Direct Interface",
             lastLatencyMs = conn.pingMs,
             connectionState = conn.status.name,
             sanitizedLogs = XrayLogManager.getLogs(),
-            lastError = conn.errorMessage
+            lastError = conn.errorMessage,
+            tunnelConnectivity = _tunnelConnectivity.value
         )
     }
 
@@ -151,6 +178,13 @@ class DiagnosticsViewModel(
         sb.appendLine("DoH Runtime Verification: ${report.dohWorking?.toString() ?: "Not measured"}")
         sb.appendLine("DNS Leak Test: ${report.dnsLeakDetected?.toString() ?: "Not performed"}")
         sb.appendLine("Network Type: ${report.networkType}")
+        val tunnelTest = report.tunnelConnectivity
+        val tunnelTestText = when {
+            tunnelTest == null -> "Not performed"
+            tunnelTest.reachable -> "PASS (HTTP ${tunnelTest.httpStatus}, ${tunnelTest.latencyMs}ms via ${tunnelTest.endpoint})"
+            else -> "FAIL (${tunnelTest.errorMessage ?: "no response"})"
+        }
+        sb.appendLine("End-to-End Tunnel Test: $tunnelTestText")
         sb.appendLine("Latency: ${report.lastLatencyMs?.let { "${it}ms" } ?: "N/A"}")
         if (report.lastError != null) {
             sb.appendLine("Last Error Reported: ${report.lastError}")
