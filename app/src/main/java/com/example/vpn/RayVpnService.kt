@@ -382,10 +382,18 @@ class RayVpnService : VpnService() {
 
             // 7. Diagnostic step 7: Select and start active engine
             activeEngine = when (settings.preferredEngine) {
-                EngineType.MIHOMO -> com.example.vpn.engine.MihomoEngine.instance
+                EngineType.MIHOMO -> {
+                    if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
+                        com.example.vpn.engine.KotlinTunnelEngine.instance
+                    } else {
+                        com.example.vpn.engine.MihomoEngine.instance
+                    }
+                }
                 EngineType.XRAY -> {
                     if (profile.protocolType == ProtocolType.HYSTERIA2 || profile.protocolType == ProtocolType.TUIC) {
                         com.example.vpn.engine.MihomoEngine.instance
+                    } else if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
+                        com.example.vpn.engine.KotlinTunnelEngine.instance
                     } else {
                         XrayEngineImpl.instance
                     }
@@ -397,11 +405,15 @@ class RayVpnService : VpnService() {
                         profile.protocolType == ProtocolType.TUIC
                     ) {
                         com.example.vpn.engine.MihomoEngine.instance
+                    } else if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
+                        com.example.vpn.engine.KotlinTunnelEngine.instance
                     } else {
                         XrayEngineImpl.instance
                     }
                 }
             }
+
+            updateState(_vpnState.value.copy(activeEngineName = activeEngine.engineVersion))
 
             updateState(_vpnState.value.copy(status = ConnectionStatus.PROXY_CONNECTING))
             showForegroundNotification("Connecting Proxy via ${activeEngine.engineType.displayName}...")
