@@ -134,7 +134,16 @@ class DiagnosticsViewModel(
             "No active server connected"
         }
 
-        val engineName = if (conn.isVpnInterfaceActive) "Xray-core (native libXray)" else "Inactive"
+        val usesNativeXray = profile?.let {
+            it.engineType == com.example.data.model.EngineType.XRAY ||
+                (it.engineType == com.example.data.model.EngineType.AUTO &&
+                    it.protocolType !in setOf(com.example.data.model.ProtocolType.HYSTERIA2, com.example.data.model.ProtocolType.TUIC))
+        } ?: false
+        val engineName = when {
+            !conn.isVpnInterfaceActive -> "Inactive"
+            usesNativeXray -> "Xray-core (native libXray)"
+            else -> "Maximus Kotlin TunnelManager"
+        }
         val protocolName = profile?.protocolType?.displayName ?: "None"
 
         return DiagnosticReport(
@@ -170,7 +179,7 @@ class DiagnosticsViewModel(
         sb.appendLine("VPN Service Status: ${if (report.vpnServiceRunning) "ACTIVE (TUN ESTABLISHED)" else "INACTIVE"}")
         sb.appendLine("Active Core Engine: ${report.activeEngine}")
         sb.appendLine("Active Protocol: ${report.activeProtocol}")
-        sb.appendLine("Native Engine: ${if (report.vpnServiceRunning) "XTLS/libXray; Xray-core attached to Android TUN" else "Not running"}")
+        sb.appendLine("Native Engine: ${if (report.activeEngine.startsWith("Xray-core")) "XTLS/libXray; attached to Android TUN" else "Not active for this connection"}")
         sb.appendLine("Connection State: ${report.connectionState}")
         sb.appendLine("Active Server: ${report.activeServerSummary}")
         sb.appendLine("Configured Routing Mode: ${report.routingMode}")
