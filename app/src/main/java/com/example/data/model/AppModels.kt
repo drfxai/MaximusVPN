@@ -328,7 +328,8 @@ data class DiagnosticReport(
     val lastLatencyMs: Long?,
     val connectionState: String,
     val sanitizedLogs: List<String>,
-    val lastError: String?
+    val lastError: String?,
+    val tunnelConnectivity: com.example.vpn.diagnostics.TunnelConnectivityResult? = null
 )
 
 enum class ErrorSource(val displayName: String, val tagPrefix: String) {
