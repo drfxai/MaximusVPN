@@ -134,7 +134,7 @@ class DiagnosticsViewModel(
             "No active server connected"
         }
 
-        val engineName = if (conn.isVpnInterfaceActive) "Maximus Kotlin TunnelManager" else "Inactive"
+        val engineName = if (conn.isVpnInterfaceActive) "Xray-core (native libXray)" else "Inactive"
         val protocolName = profile?.protocolType?.displayName ?: "None"
 
         return DiagnosticReport(
@@ -170,7 +170,7 @@ class DiagnosticsViewModel(
         sb.appendLine("VPN Service Status: ${if (report.vpnServiceRunning) "ACTIVE (TUN ESTABLISHED)" else "INACTIVE"}")
         sb.appendLine("Active Core Engine: ${report.activeEngine}")
         sb.appendLine("Active Protocol: ${report.activeProtocol}")
-        sb.appendLine("Native Engine: Not integrated; forwarding uses Kotlin")
+        sb.appendLine("Native Engine: ${if (report.vpnServiceRunning) "XTLS/libXray; Xray-core attached to Android TUN" else "Not running"}")
         sb.appendLine("Connection State: ${report.connectionState}")
         sb.appendLine("Active Server: ${report.activeServerSummary}")
         sb.appendLine("Configured Routing Mode: ${report.routingMode}")
