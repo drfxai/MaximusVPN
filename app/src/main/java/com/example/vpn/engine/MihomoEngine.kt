@@ -34,7 +34,7 @@ class MihomoEngine private constructor() : VpnEngine {
 
     companion object {
         val instance: MihomoEngine by lazy { MihomoEngine() }
-        const val VERSION = "Mihomo/Meta 1.18.8 (Android Unified)"
+        const val VERSION = "Maximus Kotlin Mihomo adapter (no native Mihomo runtime)"
     }
 
     override val engineType: EngineType = EngineType.MIHOMO
@@ -107,7 +107,7 @@ class MihomoEngine private constructor() : VpnEngine {
             // Start URL-Test group evaluators
             startUrlTestEvaluator(protectSocket)
 
-            XrayLogManager.appendLog("Mihomo Engine successfully initialized and active on port ${parsedConfig.mixedPort}/${parsedConfig.socksPort}.", "MIHOMO")
+            XrayLogManager.appendLog("Mihomo adapter ready; TUN forwarding starts separately for the selected supported node.", "MIHOMO")
             return AppResult.Success(Unit)
         } catch (e: Exception) {
             val err = "Failed to start Mihomo Engine: ${e.message}"
@@ -235,10 +235,10 @@ class MihomoEngine private constructor() : VpnEngine {
         }
     }
 
-    private fun testNodeLatency(node: ProxyNode, protectSocket: (Socket) -> Boolean): Long? {
+    internal fun testNodeLatency(node: ProxyNode, protectSocket: (Socket) -> Boolean): Long? {
         val socket = Socket()
         return try {
-            try { protectSocket(socket) } catch (_: Exception) {}
+            if (!protectSocket(socket)) return null
             val start = System.currentTimeMillis()
             socket.connect(InetSocketAddress(node.server, node.port), 3000)
             val latency = System.currentTimeMillis() - start

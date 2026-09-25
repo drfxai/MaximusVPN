@@ -27,13 +27,10 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 class UdpRelay(
     private val scope: CoroutineScope,
@@ -351,9 +348,11 @@ class UdpRelay(
     }
 
     private fun configureTlsSocket(rawSocket: Socket, profile: VlessProfile): SSLSocket {
-        val isReality = profile.security.equals("reality", ignoreCase = true)
-        if (isReality && profile.publicKey.isBlank()) {
-            throw javax.net.ssl.SSLException("REALITY Security Failure: Public key (pbk) is missing for REALITY profile '${profile.name}'")
+        if (!profile.security.equals("tls", ignoreCase = true)) {
+            throw javax.net.ssl.SSLException("Only standard TLS is supported by the embedded tunnel")
+        }
+        if (profile.fingerprint.equals("unsafe", ignoreCase = true)) {
+            throw javax.net.ssl.SSLException("TLS certificate verification cannot be disabled")
         }
 
         val sniHost = if (profile.sni.isNotBlank()) {
@@ -364,48 +363,7 @@ class UdpRelay(
             profile.address
         }
 
-        val isUnsafe = profile.fingerprint.equals("unsafe", ignoreCase = true)
-        if (isUnsafe && !com.example.BuildConfig.DEBUG) {
-            throw javax.net.ssl.SSLException("Unsafe TLS is disabled in release builds")
-        }
-        val sslContext: SSLContext
-        if (isReality) {
-            val realityTrustManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
-                    RealityVerifier.verifyRealityPeer(chain, profile.publicKey)
-                }
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            }
-            sslContext = try {
-                SSLContext.getInstance("TLSv1.3").apply {
-                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
-                }
-            } catch (_: Exception) {
-                SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(realityTrustManager), java.security.SecureRandom())
-                }
-            }
-        } else if (isUnsafe) {
-            val trustAllManager = object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            }
-            sslContext = try {
-                SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(trustAllManager), java.security.SecureRandom())
-                }
-            } catch (_: Exception) {
-                SSLContext.getDefault()
-            }
-        } else {
-            sslContext = try {
-                SSLContext.getInstance("TLSv1.3").apply { init(null, null, java.security.SecureRandom()) }
-            } catch (_: Exception) {
-                SSLContext.getDefault()
-            }
-        }
+        val sslContext = SSLContext.getDefault()
 
         val sslSocket = sslContext.socketFactory.createSocket(
             rawSocket,
@@ -415,7 +373,7 @@ class UdpRelay(
         ) as SSLSocket
 
         val params = SSLParameters()
-        if (!isReality && !isUnsafe) params.endpointIdentificationAlgorithm = "HTTPS"
+        params.endpointIdentificationAlgorithm = "HTTPS"
         if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
             params.serverNames = listOf(javax.net.ssl.SNIHostName(sniHost))
         }
@@ -522,17 +480,6 @@ class UdpRelay(
             if (read == -1) throw java.io.EOFException("Unexpected EOF reading proxied UDP packet")
             total += read
         }
-    }
-
-    private fun readHttpLine(inputStream: InputStream): String {
-        val sb = StringBuilder()
-        var c: Int
-        while (inputStream.read().also { c = it } != -1) {
-            if (c == '\n'.code) break
-            if (c != '\r'.code) sb.append(c.toChar())
-            if (sb.length > 2048) break
-        }
-        return sb.toString()
     }
 
     fun closeAll() {

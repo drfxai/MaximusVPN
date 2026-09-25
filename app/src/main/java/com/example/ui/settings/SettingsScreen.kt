@@ -465,16 +465,16 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(14.dp)) {
                 SettingToggleItem(
                     icon = Icons.Default.Lock,
-                    title = "Kill Switch (Block Non-VPN)",
-                    subtitle = "Prevents packet leaks if VPN disconnects unexpectedly",
+                    title = "In-Tunnel Kill Switch",
+                    subtitle = "Blocks while the TUN is active; enable Android Always-on VPN lockdown for OS enforcement",
                     checked = settings.killSwitchEnabled,
                     onCheckedChange = { viewModel.setKillSwitch(it) }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 SettingToggleItem(
                     icon = Icons.Default.Route,
-                    title = "IPv6 Tunnel Routing",
-                    subtitle = "Assigns IPv6 TUN virtual address & routes IPv6 traffic",
+                    title = "Block IPv6 Leaks",
+                    subtitle = "Captures and blocks IPv6 because this tunnel currently forwards IPv4 only",
                     checked = settings.ipv6Enabled,
                     onCheckedChange = { viewModel.setIpv6(it) }
                 )

@@ -49,8 +49,8 @@ interface ServerProfileDao {
     @Query("SELECT * FROM server_profiles WHERE category = :category ORDER BY overallScore DESC")
     fun getProfilesByCategory(category: String): Flow<List<ServerProfileEntity>>
 
-    @Query("SELECT * FROM server_profiles WHERE subscriptionUrl = :url OR sourceSubscription = :url ORDER BY overallScore DESC")
-    fun getProfilesBySubscription(url: String): Flow<List<ServerProfileEntity>>
+    @Query("SELECT * FROM server_profiles WHERE sourceSubscription = :key OR sourceSubscription = :legacyUrl ORDER BY overallScore DESC")
+    fun getProfilesBySubscription(key: String, legacyUrl: String): Flow<List<ServerProfileEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: ServerProfileEntity)
@@ -108,8 +108,8 @@ interface ServerProfileDao {
     @Query("DELETE FROM server_profiles WHERE id = :id")
     suspend fun deleteById(id: String)
 
-    @Query("DELETE FROM server_profiles WHERE subscriptionUrl = :url OR sourceSubscription = :url")
-    suspend fun deleteBySubscription(url: String)
+    @Query("DELETE FROM server_profiles WHERE sourceSubscription = :key OR sourceSubscription = :legacyUrl")
+    suspend fun deleteBySubscription(key: String, legacyUrl: String)
 
     @Query("DELETE FROM server_profiles")
     suspend fun deleteAll()

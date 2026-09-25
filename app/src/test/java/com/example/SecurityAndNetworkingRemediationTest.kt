@@ -16,8 +16,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.net.URI
 
 class SecurityAndNetworkingRemediationTest {
@@ -90,6 +92,17 @@ class SecurityAndNetworkingRemediationTest {
         assertTrue(SubscriptionManager.isValidSubscriptionUrl("https://example.com/sub.txt"))
         assertFalse(SubscriptionManager.isValidSubscriptionUrl("http://127.0.0.1/secret"))
         assertFalse(SubscriptionManager.isValidSubscriptionUrl("file:///etc/passwd"))
+    }
+
+    @Test
+    fun subscriptionRedirectTargetsAreValidatedBeforeFollowing() {
+        val base = "https://example.com/feed".toHttpUrl()
+        assertThrows(SecurityException::class.java) {
+            SubscriptionManager.validateRedirectTarget(base, "https://127.0.0.1/admin")
+        }
+        assertThrows(SecurityException::class.java) {
+            SubscriptionManager.validateRedirectTarget(base, "http://127.0.0.1/admin")
+        }
     }
 
     @Test

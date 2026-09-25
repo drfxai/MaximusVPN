@@ -17,9 +17,13 @@ class RuntimeRegressionTest {
     @Test fun unsupportedProfilesCannotMasqueradeAsWorkingTunnels() {
         assertNull(RuntimeCapabilities.unsupportedReason(node))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="reality")))
+        assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="tls", fingerprint="unsafe")))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(transport="grpc")))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(protocolType=ProtocolType.VMESS)))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(flow="xtls-rprx-vision")))
+        assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(profileType=ProfileType.MIHOMO_YAML, rawConfig="proxies: []")))
+        assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(protocolType=ProtocolType.TROJAN, uuid="password", security="none")))
+        assertNull(RuntimeCapabilities.unsupportedReason(node.copy(protocolType=ProtocolType.TROJAN, uuid="password", security="tls")))
         val socks = node.copy(protocolType=ProtocolType.SOCKS5, uuid="")
         VlessValidator.validate(socks)
         assertNull(RuntimeCapabilities.unsupportedReason(socks))
@@ -79,5 +83,17 @@ class RuntimeRegressionTest {
         response[1]=3
         assertFalse(DnsResponse.isResponseTo(query,response))
         assertFalse(DnsResponse.isResponseTo(query,ByteArray(5)))
+        assertFalse(DnsResponse.isResponseTo(query,ByteArray(65508).apply {
+            this[0]=1; this[1]=2; this[2]=0x80.toByte()
+        }))
+    }
+
+    @Test fun packetBuildersRejectOversizedPayloads() {
+        assertThrows(IllegalArgumentException::class.java) {
+            PacketBuilder.buildUdpPacket(byteArrayOf(1,2,3,4), byteArrayOf(8,8,8,8), 53, 53, ByteArray(65508))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PacketBuilder.buildTcpPacket(byteArrayOf(1,2,3,4), byteArrayOf(8,8,8,8), 443, 443, 1, 1, 16, payload=ByteArray(65496))
+        }
     }
 }

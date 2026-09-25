@@ -14,6 +14,11 @@ object SecretRedactor {
         "(vless|vmess|trojan|ss|ssr|hysteria2|hy2|tuic)://([^@]+)@([^:/?#]+):(\\d+)([^\\s\"'<>]*)"
     )
 
+    private val HTTP_USERINFO_PATTERN = Pattern.compile(
+        "(https?://)([^/@\\s]+)@",
+        Pattern.CASE_INSENSITIVE
+    )
+
     private val REALITY_PBK_PATTERN = Pattern.compile(
         "(pbk|publicKey|public_key|secretKey|private_key|privateKey)=([^&\\s,}{\"]+)"
     )
@@ -56,6 +61,7 @@ object SecretRedactor {
         if (proxyMatcher.find()) {
             result = proxyMatcher.replaceAll("$1://[REDACTED_CREDENTIALS]@$3:$4[REDACTED_PARAMS]")
         }
+        result = HTTP_USERINFO_PATTERN.matcher(result).replaceAll("$1[REDACTED_CREDENTIALS]@")
 
         // Redact standalone UUIDs
         result = UUID_PATTERN.matcher(result).replaceAll("[REDACTED_UUID]")

@@ -14,15 +14,22 @@ import org.yaml.snakeyaml.constructor.SafeConstructor
 import java.util.UUID
 
 object MihomoParser {
+    private const val MAX_YAML_CODE_POINTS = 2_000_000
 
     /**
      * Safely parses a Mihomo/Clash Meta YAML string into a structured MihomoConfig.
      */
     fun parseYaml(yamlContent: String): MihomoConfig {
         if (yamlContent.isBlank()) return MihomoConfig()
+        if (yamlContent.length > MAX_YAML_CODE_POINTS) {
+            XrayLogManager.appendLog("Mihomo YAML rejected: input exceeds 2,000,000 characters", "MIHOMO")
+            return MihomoConfig()
+        }
 
         val options = LoaderOptions().apply {
-            maxAliasesForCollections = 200
+            codePointLimit = MAX_YAML_CODE_POINTS
+            nestingDepthLimit = 50
+            maxAliasesForCollections = 50
         }
         val yaml = Yaml(SafeConstructor(options))
         val rootMap = try {

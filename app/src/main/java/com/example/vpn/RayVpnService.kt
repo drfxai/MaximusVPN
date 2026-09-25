@@ -274,7 +274,7 @@ class RayVpnService : VpnService() {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
                 updateState(_vpnState.value.copy(
                     status = ConnectionStatus.FAILED,
-                    errorMessage = "Invalid VLESS profile configuration: ${e.localizedMessage}"
+                    errorMessage = "Unsupported or invalid proxy profile: ${e.localizedMessage}"
                 ))
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -297,13 +297,6 @@ class RayVpnService : VpnService() {
                 .setBlocking(true)
                 .addAddress("172.19.0.1", 30)
                 .addRoute("0.0.0.0", 0)
-
-            try {
-                builder.addDisallowedApplication(packageName)
-                XrayLogManager.i("VPN", "Excluded '$packageName' from VPN routing to avoid socket loops.")
-            } catch (e: Exception) {
-                XrayLogManager.w("VPN", "Failed to add disallowed application: ${e.message}")
-            }
 
             try {
                 builder.addDnsServer(primaryDns)

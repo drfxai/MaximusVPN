@@ -96,16 +96,13 @@ object VlessHeader {
     fun decodeResponse(inputStream: InputStream): Boolean {
         try {
             val version = inputStream.read()
-            if (version == -1) return false
+            if (version != 0) return false
             val addonLen = inputStream.read()
             if (addonLen == -1) return false
-            if (addonLen > 0) {
-                var skipped = 0L
-                while (skipped < addonLen) {
-                    val s = inputStream.skip(addonLen.toLong() - skipped)
-                    if (s <= 0) break
-                    skipped += s
-                }
+            var remaining = addonLen
+            while (remaining > 0) {
+                if (inputStream.read() == -1) return false
+                remaining--
             }
             return true
         } catch (_: Exception) {

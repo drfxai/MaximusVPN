@@ -58,39 +58,15 @@ object ServerTester {
             val tcpLatency = ((System.nanoTime() - startTime) / 1_000_000).coerceAtLeast(1)
 
             // Stage 3: TLS / Handshake Test if configured
-            val sslLatency = if (profile.security.equals("tls", ignoreCase = true) || profile.security.equals("reality", ignoreCase = true)) {
-                val isReality = profile.security.equals("reality", ignoreCase = true)
-                val sslContext = if (isReality) {
-                    val realityTrustManager = object : javax.net.ssl.X509TrustManager {
-                        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-                        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {
-                            com.example.vpn.tunnel.RealityVerifier.verifyRealityPeer(chain, profile.publicKey)
-                        }
-                        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-                    }
-                    try {
-                        SSLContext.getInstance("TLSv1.3").apply {
-                            init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
-                        }
-                    } catch (_: Exception) {
-                        SSLContext.getInstance("TLS").apply {
-                            init(null, arrayOf<javax.net.ssl.TrustManager>(realityTrustManager), java.security.SecureRandom())
-                        }
-                    }
-                } else {
-                    try {
-                        SSLContext.getDefault()
-                    } catch (_: Exception) {
-                        SSLContext.getInstance("TLS").apply { init(null, null, java.security.SecureRandom()) }
-                    }
-                }
+            val sslLatency = if (profile.security.equals("tls", ignoreCase = true)) {
+                val sslContext = SSLContext.getDefault()
                 val sslFactory = sslContext.socketFactory
                 val sniHost = profile.sni.ifBlank { profile.host.ifBlank { profile.address } }
                 sslSocket = sslFactory.createSocket(socket, sniHost, profile.port, true) as SSLSocket
                 sslSocket.soTimeout = timeoutMs
 
                 val sslParams = SSLParameters().apply {
-                    if (!isReality) endpointIdentificationAlgorithm = "HTTPS"
+                    endpointIdentificationAlgorithm = "HTTPS"
                     if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
                         serverNames = listOf(SNIHostName(sniHost))
                     }

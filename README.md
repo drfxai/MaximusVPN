@@ -47,6 +47,10 @@ To publish without the manual Actions form, update the app version and `release-
 
 The Samsung Android 15 report for v1.0.3 showed that TUN establishment succeeded while all outbound TCP and DoH sockets failed Android `VpnService.protect()`. New TCP sockets now bind before protection so they have a usable file descriptor, and a protection probe must pass before the app reports `CONNECTED`. A later protection failure stops forwarding with an error instead of rotating servers. Failover ignores duplicate imports and the current server endpoint, and its cooldown survives reconnects. Release automation checks installation over v1.0.3; a physical ARM64 traffic test is still needed to confirm the device result.
 
+## v1.0.5 source update
+
+This release tightens VLESS, HTTP CONNECT, SOCKS5, TLS, subscription redirect, and packet validation; protects subscription URLs at rest; and updates database migration and lookup paths. The app now routes its own browser traffic through the active VPN, labels IPv6 controls as leak blocking, and describes chat as a local contact preview because authenticated peer messaging is not implemented. Release automation verifies upgrade from v1.0.4.
+
 ## v1.0.3 review and validation
 
 This release builds standalone ARM64 and universal APKs with extracted native libraries. Both keep the same application ID and signing key. Android 15 CI checks installation and startup. The release workflow checks upgrading from the signed v1.0.2 universal APK; it also tests the ARM64 APK when the emulator advertises ARM64 translation. Physical Samsung installation remains a separate device check.
@@ -57,4 +61,4 @@ Runtime support is limited to VLESS and Trojan over TCP/WebSocket with none/TLS 
 
 Peer discovery is not an authenticated relay; automatic failover no longer invents proxy credentials from bridge or mesh records. Chat sending is disabled because authenticated peer transport has not been implemented.
 
-Remaining limitations: the Kotlin TCP bridge lacks a complete downstream retransmission/window implementation. IPv6 packets are not forwarded. The embedded browser runs in the VPN-excluded application, so its traffic bypasses the VPN; its UI now states this. DNS uses protected direct resolver sockets. Settings that alter the packet path require reconnecting. Android always-on VPN/lockdown is needed for OS-enforced blocking after the service exits. Device traffic/leak tests and real provider interoperability remain necessary; passing CI does not establish production-grade VPN security.
+Remaining limitations: the Kotlin TCP bridge lacks a complete downstream retransmission/window implementation. IPv6 packets are not forwarded. The embedded browser follows the active VPN route; only explicitly protected tunnel and resolver sockets bypass the TUN to prevent loops. DNS uses protected direct resolver sockets. Settings that alter the packet path require reconnecting. Android always-on VPN/lockdown is needed for OS-enforced blocking after the service exits. Device traffic/leak tests and real provider interoperability remain necessary; passing CI does not establish production-grade VPN security.

@@ -52,7 +52,8 @@ class ServerRepository(private val dao: ServerProfileDao) {
     }
 
     fun getProfilesBySubscription(url: String): Flow<List<VlessProfile>> {
-        return dao.getProfilesBySubscription(url).map { list -> list.map { it.toDomain() } }
+        return dao.getProfilesBySubscription(CanonicalFingerprint.computeSubscriptionKey(url), url)
+            .map { list -> list.map { it.toDomain() } }
     }
 
     suspend fun insert(profile: VlessProfile) {
@@ -133,7 +134,14 @@ class ServerRepository(private val dao: ServerProfileDao) {
     }
 
     suspend fun deleteBySubscription(url: String) {
-        dao.deleteBySubscription(url)
+        dao.deleteBySubscription(CanonicalFingerprint.computeSubscriptionKey(url), url)
+    }
+
+    /** Rewrites legacy plaintext per-node subscription sources as encrypted URL + lookup hash. */
+    suspend fun migrateSensitiveSubscriptionSources() {
+        dao.getAllProfilesOnce()
+            .filter { it.sourceSubscription?.startsWith("https://", ignoreCase = true) == true }
+            .forEach { dao.update(ServerProfileEntity.fromDomain(it.toDomain())) }
     }
 
     suspend fun deleteAll() {

@@ -81,7 +81,7 @@ fun GodBrowserScreen(
                             }
                         }
                         Text(
-                            text = "Trackers Blocked: $blockedTrackerCount • App traffic bypasses VPN",
+                            text = "Trackers Blocked: $blockedTrackerCount • App traffic follows VPN routing",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -197,7 +197,6 @@ fun GodBrowserScreen(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true // Enable HTML5 DOM storage for web app compatibility
-                                databaseEnabled = true
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 allowFileAccess = false

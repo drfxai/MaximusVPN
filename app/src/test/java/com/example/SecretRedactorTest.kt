@@ -35,6 +35,13 @@ class SecretRedactorTest {
     }
 
     @Test
+    fun redact_replacesHttpsUserInfoCredentials() {
+        val redacted = SecretRedactor.redact("Syncing https://alice:secret@example.com/sub")
+        assertFalse(redacted.contains("alice:secret"))
+        assertTrue(redacted.contains("https://[REDACTED_CREDENTIALS]@example.com/sub"))
+    }
+
+    @Test
     fun formatThrowable_sanitizesSensitiveStackTrace() {
         val exception = RuntimeException("Connection failed for vless://e7b99c42-88f1-4b19-9182-3d84a7e93f12@192.168.1.1:443")
         val formatted = SecretRedactor.formatThrowable(exception)

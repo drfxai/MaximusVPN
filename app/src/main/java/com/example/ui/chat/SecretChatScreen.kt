@@ -62,7 +62,7 @@ fun SecretChatScreen(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (activeConversation != null) activeConversation!!.peerAlias.ifBlank { activeConversation!!.peerAtomicId.take(9) + "..." } else "Secret E2EE Chat",
+                                text = if (activeConversation != null) activeConversation!!.peerAlias.ifBlank { activeConversation!!.peerAtomicId.take(9) + "..." } else "Messaging Preview (Unavailable)",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium
                             )
@@ -72,7 +72,7 @@ fun SecretChatScreen(
                                 color = Color(0xFF9C27B0).copy(alpha = 0.25f)
                             ) {
                                 Text(
-                                    text = "E2EE",
+                                    text = "OFFLINE",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFCE93D8),
@@ -203,7 +203,7 @@ fun SecretChatScreen(
 
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
-                                    text = "Share this 20-digit ID with another Maximus user to initiate end-to-end encrypted direct peer chat.",
+                                    text = "Local identifier only. Authenticated key exchange and peer transport are not implemented.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -219,13 +219,13 @@ fun SecretChatScreen(
                         ) {
                             Icon(Icons.Default.AddComment, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("New Secret Conversation")
+                            Text("Save Local Contact")
                         }
                     }
 
                     item {
                         Text(
-                            text = "ACTIVE CONVERSATIONS (${conversations.size})",
+                            text = "LOCAL CONTACTS (${conversations.size})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -249,12 +249,12 @@ fun SecretChatScreen(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "No active conversations",
+                                        text = "No local contacts",
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        text = "Enter a 20-digit Atomic ID to start an E2EE chat",
+                                        text = "Messaging is unavailable in this build",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                     )
@@ -299,7 +299,7 @@ fun SecretChatScreen(
                                             fontSize = 15.sp
                                         )
                                         Text(
-                                            text = conv.lastMessageText ?: "Encrypted session established",
+                                            text = conv.lastMessageText ?: "No authenticated session",
                                             fontSize = 13.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1
@@ -438,11 +438,11 @@ fun SecretChatScreen(
     if (showNewChatDialog) {
         AlertDialog(
             onDismissRequest = { showNewChatDialog = false },
-            title = { Text("Connect to Peer Atomic ID") },
+            title = { Text("Save Local Contact ID") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Enter the 20-digit Atomic ID of the peer you wish to start an E2EE session with.",
+                        text = "This saves a local contact only. It does not establish an encrypted or network session.",
                         fontSize = 13.sp
                     )
                     OutlinedTextField(
@@ -477,7 +477,7 @@ fun SecretChatScreen(
                         }
                     }
                 ) {
-                    Text("Connect")
+                    Text("Save")
                 }
             },
             dismissButton = {
@@ -492,9 +492,9 @@ fun SecretChatScreen(
     if (showNukeConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showNukeConfirmDialog = false },
-            title = { Text("Nuke & Shred All Secret Chats?") },
+            title = { Text("Delete All Local Contact Data?") },
             text = {
-                Text("This will immediately overwrite and wipe all conversations, cryptographic keys, and message logs from local RAM and storage. This action is irreversible.")
+                Text("This removes the app's local contact records. Flash storage may retain system-managed remnants, so this is deletion—not guaranteed forensic erasure.")
             },
             confirmButton = {
                 Button(
@@ -502,11 +502,11 @@ fun SecretChatScreen(
                         chatManager.nukeAllChats()
                         activeConversation = null
                         showNukeConfirmDialog = false
-                        Toast.makeText(context, "All chats shredded cleanly.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Local contact data deleted.", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Nuke All")
+                    Text("Delete All")
                 }
             },
             dismissButton = {
