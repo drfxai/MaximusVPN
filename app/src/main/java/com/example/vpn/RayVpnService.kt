@@ -31,6 +31,7 @@ import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
 import com.example.vpn.engine.MihomoEngine
 import com.example.vpn.engine.VpnEngine
+import com.example.vpn.engine.NativeTunVpnEngine
 import com.example.xray.XrayConfigBuilder
 import com.example.xray.XrayEngine
 import com.example.xray.XrayEngineImpl
@@ -405,12 +406,16 @@ class RayVpnService : VpnService() {
             updateState(_vpnState.value.copy(status = ConnectionStatus.PROXY_CONNECTING))
             showForegroundNotification("Connecting Proxy via ${activeEngine.engineType.displayName}...")
 
-            val startResult = activeEngine.start(
-                profile = profile,
-                settings = settings,
-                protectSocket = { socket: Socket -> safeProtectSocket(socket) },
-                protectDatagram = { dSocket: DatagramSocket -> safeProtectDatagram(dSocket) }
-            )
+            val startResult = if (activeEngine is NativeTunVpnEngine) {
+                (activeEngine as NativeTunVpnEngine).startWithTun(profile, settings.copy(mtu = safeMtu), pfd.fd) { fd -> safeProtectFd(fd) }
+            } else {
+                activeEngine.start(
+                    profile = profile,
+                    settings = settings,
+                    protectSocket = { socket: Socket -> safeProtectSocket(socket) },
+                    protectDatagram = { dSocket: DatagramSocket -> safeProtectDatagram(dSocket) }
+                )
+            }
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 7. Proxy engine start result: $startResult.")
             if (startResult is com.example.core.AppResult.Error) throw startResult.exception
 
@@ -419,8 +424,8 @@ class RayVpnService : VpnService() {
                 return@withContext
             }
 
-            // 8. Diagnostic step 8: Start Tunnel Manager to handle TUN packets
-            tunnelManager = TunnelManager(
+            // Native Xray owns the TUN fd directly; the Kotlin packet loop must not read it concurrently.
+            if (activeEngine !is NativeTunVpnEngine) tunnelManager = TunnelManager(
                 vpnInterface = pfd,
                 profile = profile,
                 settings = settings.copy(mtu = safeMtu),
@@ -463,7 +468,7 @@ class RayVpnService : VpnService() {
                 }
             )
             tunnelManager?.start()
-            XrayLogManager.i("VPN", "[DIAGNOSTICS] 8. TUN packet loop started.")
+            XrayLogManager.i("VPN", "[DIAGNOSTICS] 8. ${if (activeEngine is NativeTunVpnEngine) "Native Xray TUN loop started" else "TUN packet loop started"}.")
 
             if (!coroutineContext.isActive) {
                 disconnectResources()
@@ -534,6 +539,13 @@ class RayVpnService : VpnService() {
             XrayLogManager.w("SOCKET", "Unable to prepare or protect TCP socket: ${e.message}")
         }
         return false
+    }
+
+    private fun safeProtectFd(fd: Int): Boolean = try {
+        protect(fd)
+    } catch (e: Exception) {
+        XrayLogManager.e("VPN", "Failed to protect native Xray socket fd $fd", e)
+        false
     }
 
     private fun safeProtectDatagram(datagramSocket: DatagramSocket): Boolean {
@@ -636,12 +648,13 @@ class RayVpnService : VpnService() {
         tunnelManager?.stop()
         tunnelManager = null
 
+        // Stop Xray before closing the TUN descriptor it owns.
+        activeEngine.stop()
+
         try {
             vpnInterface?.close()
         } catch (_: Exception) {}
         vpnInterface = null
-
-        activeEngine.stop()
 
         val currentMode = settingsRepository.getSettings().operationalMode
         if (currentMode != com.example.data.model.OperationalMode.GOD_MODE) {
