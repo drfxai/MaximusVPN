@@ -134,15 +134,12 @@ class DiagnosticsViewModel(
             "No active server connected"
         }
 
-        val usesNativeXray = profile?.let {
-            it.engineType == com.example.data.model.EngineType.XRAY ||
-                (it.engineType == com.example.data.model.EngineType.AUTO &&
-                    it.protocolType !in setOf(com.example.data.model.ProtocolType.HYSTERIA2, com.example.data.model.ProtocolType.TUIC))
-        } ?: false
+        val selectedEngine = conn.activeEngineName.orEmpty()
         val engineName = when {
             !conn.isVpnInterfaceActive -> "Inactive"
-            usesNativeXray -> "Xray-core (native libXray)"
-            else -> "Maximus Kotlin TunnelManager"
+            selectedEngine.startsWith("Xray-core via XTLS/libXray") -> "Xray-core (native libXray)"
+            selectedEngine.isNotBlank() -> selectedEngine
+            else -> "Unknown (engine not recorded)"
         }
         val protocolName = profile?.protocolType?.displayName ?: "None"
 
