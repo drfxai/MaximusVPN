@@ -58,7 +58,6 @@ class FailoverManager(
     val failoverEvents: StateFlow<String?> = _failoverEvents.asStateFlow()
 
     private var consecutiveFailures = 0
-    private var lastSwitchTimestamp = 0L
     private var currentActiveProfile: VlessProfile? = null
     private var currentActiveSettings: AppSettings? = null
 
@@ -85,10 +84,8 @@ class FailoverManager(
 
                     // Require 3 consecutive failures to avoid flapping
                     if (consecutiveFailures >= 3) {
-                        val now = System.currentTimeMillis()
-                        // 25-second cooldown between failovers
-                        if (now - lastSwitchTimestamp > 25000) {
-                            lastSwitchTimestamp = now
+                        // The cooldown must survive a service switch, which creates a new manager.
+                        if (acquireFailoverCooldown(25000)) {
                             attemptFailover(currentProfile, settings)
                         }
                     }
@@ -118,9 +115,7 @@ class FailoverManager(
         XrayLogManager.w("FAILOVER", "Active tunnel error reported on '$safeName' ($consecutiveFailures/3): $reason")
 
         if (consecutiveFailures >= 3) {
-            val now = System.currentTimeMillis()
-            if (now - lastSwitchTimestamp > 20000) {
-                lastSwitchTimestamp = now
+            if (acquireFailoverCooldown(20000)) {
                 scope.launch {
                     attemptFailover(profile, settings)
                 }
@@ -198,9 +193,7 @@ class FailoverManager(
         val safeDegraded = SecretRedactor.redact(degradedProfile.name)
 
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
-        val nonDegraded = allProfiles.filter {
-            com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null && it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
-        }
+        val nonDegraded = eligibleFallbacks(allProfiles, degradedProfile)
         val scoredCandidates = nonDegraded.filter { it.overallScore > 0 }
         val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else nonDegraded
 
@@ -245,6 +238,28 @@ class FailoverManager(
             _failoverEvents.value = reason
             XrayLogManager.i("FAILOVER", reason)
             onTriggerSwitch(fallback.profile, reason)
+        } else {
+            XrayLogManager.w("FAILOVER", "No distinct supported fallback node is available for $safeDegraded; keeping the current connection.")
+        }
+    }
+
+    companion object {
+        private val lastFailoverAt = java.util.concurrent.atomic.AtomicLong(0L)
+
+        private fun acquireFailoverCooldown(intervalMs: Long): Boolean {
+            val now = System.nanoTime() / 1_000_000
+            while (true) {
+                val previous = lastFailoverAt.get()
+                if (previous != 0L && now - previous < intervalMs) return false
+                if (lastFailoverAt.compareAndSet(previous, now)) return true
+            }
+        }
+
+        internal fun eligibleFallbacks(profiles: List<VlessProfile>, current: VlessProfile): List<VlessProfile> = profiles.filter {
+            com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null &&
+                it.id != current.id && it.effectiveFingerprint != current.effectiveFingerprint &&
+                !(it.address.equals(current.address, ignoreCase = true) && it.port == current.port) &&
+                !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
         }
     }
 }
