@@ -30,8 +30,8 @@ data class IPv4Header(
     val dstIpStr: String get() = formatIp(dstIp)
 
     companion object {
-        fun parse(buffer: ByteArray, offset: Int = 0): IPv4Header? {
-            if (buffer.size - offset < 20) return null
+        fun parse(buffer: ByteArray, offset: Int = 0, packetLength: Int = buffer.size - offset): IPv4Header? {
+            if (offset < 0 || packetLength < 20 || offset > buffer.size - packetLength) return null
             val versionAndIhl = buffer[offset].toInt() and 0xFF
             val version = versionAndIhl shr 4
             if (version != 4) return null
@@ -40,6 +40,7 @@ data class IPv4Header(
 
             val tos = buffer[offset + 1].toInt() and 0xFF
             val totalLength = ((buffer[offset + 2].toInt() and 0xFF) shl 8) or (buffer[offset + 3].toInt() and 0xFF)
+            if (ihl * 4 > totalLength || totalLength > packetLength) return null
             val identification = ((buffer[offset + 4].toInt() and 0xFF) shl 8) or (buffer[offset + 5].toInt() and 0xFF)
             val flagsAndFrag = ((buffer[offset + 6].toInt() and 0xFF) shl 8) or (buffer[offset + 7].toInt() and 0xFF)
             val ttl = buffer[offset + 8].toInt() and 0xFF
@@ -92,12 +93,13 @@ data class UdpHeader(
 ) {
     companion object {
         fun parse(buffer: ByteArray, offset: Int, totalPacketLength: Int): UdpHeader? {
-            if (buffer.size - offset < 8) return null
+            if (offset < 0 || totalPacketLength > buffer.size || offset > totalPacketLength - 8) return null
             val srcPort = ((buffer[offset].toInt() and 0xFF) shl 8) or (buffer[offset + 1].toInt() and 0xFF)
             val dstPort = ((buffer[offset + 2].toInt() and 0xFF) shl 8) or (buffer[offset + 3].toInt() and 0xFF)
             val length = ((buffer[offset + 4].toInt() and 0xFF) shl 8) or (buffer[offset + 5].toInt() and 0xFF)
             val checksum = ((buffer[offset + 6].toInt() and 0xFF) shl 8) or (buffer[offset + 7].toInt() and 0xFF)
 
+            if (length < 8 || length > totalPacketLength - offset) return null
             val payloadOffset = offset + 8
             val payloadLength = (length - 8).coerceAtLeast(0)
 
@@ -128,7 +130,8 @@ data class TcpHeader(
     companion object {
         fun parse(buffer: ByteArray, ipHeaderOffset: Int, ipHeaderLen: Int, totalIpLength: Int): TcpHeader? {
             val offset = ipHeaderOffset + ipHeaderLen
-            if (buffer.size - offset < 20) return null
+            if (ipHeaderOffset < 0 || ipHeaderLen < 20 || totalIpLength < ipHeaderLen + 20 ||
+                ipHeaderOffset > buffer.size - totalIpLength) return null
 
             val srcPort = ((buffer[offset].toInt() and 0xFF) shl 8) or (buffer[offset + 1].toInt() and 0xFF)
             val dstPort = ((buffer[offset + 2].toInt() and 0xFF) shl 8) or (buffer[offset + 3].toInt() and 0xFF)
@@ -150,6 +153,7 @@ data class TcpHeader(
             val urgentPointer = ((buffer[offset + 18].toInt() and 0xFF) shl 8) or (buffer[offset + 19].toInt() and 0xFF)
 
             val tcpHeaderByteLen = dataOffset * 4
+            if (dataOffset < 5 || tcpHeaderByteLen > totalIpLength - ipHeaderLen) return null
             val payloadOffset = offset + tcpHeaderByteLen
             val payloadLength = (totalIpLength - ipHeaderLen - tcpHeaderByteLen).coerceAtLeast(0)
 
@@ -247,9 +251,9 @@ object PacketBuilder {
         requestPacket: ByteArray,
         length: Int
     ): ByteArray? {
-        if (length < 28) return null
+        if (length < 28 || length > requestPacket.size) return null
         val ipHeader = IPv4Header.parse(requestPacket, 0) ?: return null
-        if (ipHeader.protocol != IpProtocol.ICMP) return null
+        if (ipHeader.protocol != IpProtocol.ICMP || ipHeader.ihl * 4 + 8 > length) return null
 
         val ipHeaderLen = ipHeader.ihl * 4
         val icmpOffset = ipHeaderLen

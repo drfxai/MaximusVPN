@@ -199,7 +199,7 @@ class FailoverManager(
 
         // Non-degraded candidates pool (excluding current failing node, bridges, mesh)
         val nonDegraded = allProfiles.filter {
-            it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
+            com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null && it.id != degradedProfile.id && !it.id.startsWith("bridge-") && !it.id.startsWith("mesh-")
         }
         val scoredCandidates = nonDegraded.filter { it.overallScore > 0 }
         val candidateProfiles = if (scoredCandidates.isNotEmpty()) scoredCandidates else nonDegraded
@@ -220,32 +220,10 @@ class FailoverManager(
                 return
             }
 
-            // Step 2: Psiphon / Conduit volunteer bridges (Tier 3)
-            val bestBridge = PsiphonConduitBridge.getBestActiveBridge()
-            if (bestBridge != null && bestBridge.isVerified) {
-                _currentTier.value = CascadeTier.TIER_3_VOLUNTEER_BRIDGES
-                val bridgeProfile = PsiphonConduitBridge.asVlessProfile(bestBridge)
-                val reason = "GOD Mode Cascade [Tier 3]: Switched to Psiphon/Conduit Bridge (${bestBridge.region})"
-                _failoverEvents.value = reason
-                XrayLogManager.i("GOD_MODE", reason)
-                onTriggerSwitch(bridgeProfile, reason)
-                return
-            }
-
-            // Step 3: Local P2P Mesh relay (Tier 4)
-            val bestPeer = MaximusMeshManager.getBestRelayPeer()
-            if (bestPeer != null) {
-                _currentTier.value = CascadeTier.TIER_4_LOCAL_MESH
-                val meshProfile = MaximusMeshManager.asVlessProfile(bestPeer)
-                val reason = "GOD Mode Cascade [Tier 4]: Switched to Local Maximus Mesh Relay (${bestPeer.peerId})"
-                _failoverEvents.value = reason
-                XrayLogManager.i("GOD_MODE", reason)
-                onTriggerSwitch(meshProfile, reason)
-                return
-            }
-
+            // Discovery and TCP reachability are not authenticated proxy credentials.
+            // Never invent a VLESS UUID or send traffic to an unverified LAN beacon.
             _currentTier.value = CascadeTier.DEGRADED_OFFLINE
-            XrayLogManager.e("GOD_MODE", "All cascade tiers exhausted for $safeDegraded. Operating in offline mesh beacon mode.")
+            XrayLogManager.e("GOD_MODE", "All cascade tiers exhausted for $safeDegraded. No verified fallback profile is available.")
         }
 
         // Standard Daily Mode fallback

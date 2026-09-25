@@ -86,7 +86,7 @@ class SecretChatManager(private val context: Context) {
                         unreadCount = obj.optInt("unreadCount", 0),
                         lastMessageText = if (obj.has("lastMessageText") && !obj.isNull("lastMessageText")) obj.getString("lastMessageText") else null,
                         lastMessageTime = obj.optLong("lastMessageTime", System.currentTimeMillis()),
-                        isVerifiedE2ee = obj.optBoolean("isVerifiedE2ee", true)
+                        isVerifiedE2ee = false
                     )
                     conversationsMap[conv.id] = conv
                 }
@@ -148,38 +148,8 @@ class SecretChatManager(private val context: Context) {
     }
 
     fun sendMessage(conversationId: String, text: String): Boolean {
-        if (text.isBlank()) return false
-        val conv = conversationsMap[conversationId] ?: return false
-
-        // Derive E2EE root key and forward-secret ephemeral ratchet message key
-        val rootKey = CryptoE2ee.deriveSharedKey(_myAtomicId.value, conv.peerAtomicId)
-        val currentMsgCount = (messagesMap[conversationId]?.size ?: 0).toLong()
-        val ratchetKey = CryptoE2ee.deriveRatchetMessageKey(rootKey, currentMsgCount)
-        val encryptedPayload = CryptoE2ee.encrypt(text, ratchetKey)
-
-        val msg = SecretMessage(
-            conversationId = conversationId,
-            senderAtomicId = _myAtomicId.value,
-            text = text,
-            isOutgoing = true,
-            ephemeralTimer = conv.ephemeralTimer,
-            expiresAt = if (conv.ephemeralTimer.seconds > 0) System.currentTimeMillis() + (conv.ephemeralTimer.seconds * 1000) else null,
-            isEncrypted = true,
-            deliveryStatus = MessageStatus.SENT
-        )
-
-        val list = messagesMap.getOrPut(conversationId) { mutableListOf() }
-        list.add(msg)
-        _activeMessagesFlow.value = list.toList()
-
-        val updatedConv = conv.copy(
-            lastMessageText = text,
-            lastMessageTime = System.currentTimeMillis()
-        )
-        conversationsMap[conversationId] = updatedConv
-        _conversationsFlow.value = conversationsMap.values.sortedByDescending { it.lastMessageTime }
-        persistConversations()
-        return true
+        // No authenticated peer transport is integrated. Do not report a local draft as sent.
+        return false
     }
 
     fun updateEphemeralTimer(conversationId: String, timer: EphemeralTimer) {
@@ -213,7 +183,7 @@ class SecretChatManager(private val context: Context) {
         activeConversationId = null
         _conversationsFlow.value = emptyList()
         _activeMessagesFlow.value = emptyList()
-        prefs.edit().clear().apply()
+        prefs.edit().remove("enc_conversations").apply()
     }
 
     /**

@@ -41,3 +41,16 @@ Benchmarks use the same transport validation and count unsuccessful samples. Dow
 Diagnostics display the build version and Kotlin forwarding runtime. Native Xray execution is not integrated. DNS leak tests, DoH runtime verification and end-to-end connectivity are not inferred from settings or a TUN interface.
 
 To publish without the manual Actions form, update the app version and `release-version.txt` together in a reviewed change to `main`. A change to that file starts the same signed release workflow; use a new tag each time. Release assets include `arm64-v8a.apk`, `app-release.apk`, `SHA256SUMS`, and GitHub's source archives.
+
+
+## v1.0.3 review and validation
+
+This release builds standalone ARM64 and universal APKs with extracted native libraries. Both keep the same application ID and signing key. Android 15 CI checks installation and startup. The release workflow checks upgrading from the signed v1.0.2 universal APK; it also tests the ARM64 APK when the emulator advertises ARM64 translation. Physical Samsung installation remains a separate device check.
+
+Runtime corrections include packet bounds, blocking TUN reads, shared service settings, failed socket protection, duplicate TCP uploads, FIN payloads, bounded queues, WebSocket ping/pong handling, UDP frame reassembly and UDP receive lifetime. DNS-over-HTTPS no longer silently falls back to plaintext DNS. Browser certificate errors are rejected.
+
+Runtime support is limited to VLESS and Trojan over TCP/WebSocket with none/TLS security, and unauthenticated HTTP CONNECT/SOCKS5 TCP proxies. Only VLESS has proxied UDP in this build. Unsupported profiles remain importable but are rejected before VPN setup. Native Xray/Mihomo, REALITY, Vision, VMess, Shadowsocks, Hysteria and TUIC are not implemented. Imported raw routing/group configuration is not executed by a native core.
+
+Peer discovery is not an authenticated relay; automatic failover no longer invents proxy credentials from bridge or mesh records. Chat sending is disabled because authenticated peer transport has not been implemented.
+
+Remaining limitations: the Kotlin TCP bridge lacks a complete downstream retransmission/window implementation. IPv6 packets are not forwarded. The embedded browser runs in the VPN-excluded application, so its traffic bypasses the VPN; its UI now states this. DNS uses protected direct resolver sockets. Settings that alter the packet path require reconnecting. Android always-on VPN/lockdown is needed for OS-enforced blocking after the service exits. Device traffic/leak tests and real provider interoperability remain necessary; passing CI does not establish production-grade VPN security.

@@ -95,9 +95,10 @@ class UdpRelay(
         var socket: Socket? = null,
         var outStream: OutputStream? = null,
         var inStream: InputStream? = null,
-        val sendChannel: Channel<ByteArray> = Channel(Channel.UNLIMITED),
+        val sendChannel: Channel<ByteArray> = Channel(64),
         var writerJob: Job? = null,
         var readerJob: Job? = null,
+        @Volatile var isClosed: Boolean = false,
         @Volatile var isConnected: Boolean = false
     ) : UdpSession(key, clientIp, serverIp, clientPort, serverPort) {
         override fun send(payload: ByteArray) {
@@ -105,6 +106,7 @@ class UdpRelay(
         }
 
         override fun close() {
+            isClosed = true
             isConnected = false
             sendChannel.close()
             writerJob?.cancel()
@@ -141,7 +143,7 @@ class UdpRelay(
         packetData: ByteArray
     ) {
         val payloadLen = udpHeader.payloadLength
-        if (payloadLen <= 0 || payloadLen > packetData.size) return
+        if (payloadLen <= 0 || udpHeader.payloadOffset < 0 || udpHeader.payloadOffset > packetData.size - payloadLen) return
 
         val payload = ByteArray(payloadLen)
         System.arraycopy(packetData, udpHeader.payloadOffset, payload, 0, payloadLen)
@@ -182,7 +184,8 @@ class UdpRelay(
             }
             try {
                 val socket = DatagramSocket()
-                try { protectDatagram(socket) } catch (_: Exception) {}
+                if (!protectDatagram(socket)) { socket.close(); error("UDP socket protection failed") }
+                socket.connect(InetAddress.getByAddress(ipHeader.dstIp), udpHeader.dstPort)
                 socket.soTimeout = 10000
 
                 val newSession = DirectUdpSession(
@@ -210,12 +213,13 @@ class UdpRelay(
 
     private fun startDirectListening(session: DirectUdpSession) {
         session.listenJob = scope.launch(Dispatchers.IO) {
-            val buffer = ByteArray(2048)
+            val buffer = ByteArray(65507)
             val packet = DatagramPacket(buffer, buffer.size)
 
             try {
                 while (isActive) {
-                    session.socket.receive(packet)
+                    packet.length = buffer.size
+                    try { session.socket.receive(packet) } catch (_: java.net.SocketTimeoutException) { continue }
                     val len = packet.length
                     if (len > 0) {
                         session.lastActiveTime = System.currentTimeMillis()
@@ -235,7 +239,10 @@ class UdpRelay(
                     }
                 }
             } catch (_: Exception) {
-                // Socket closed or timeout
+                // Socket closed.
+            } finally {
+                sessions.remove(session.key, session)
+                session.close()
             }
         }
     }
@@ -245,7 +252,7 @@ class UdpRelay(
         udpHeader: UdpHeader,
         payload: ByteArray
     ) {
-        if (profile == null) return
+        if (profile == null || profile.protocolType != ProtocolType.VLESS) return
 
         val key = "proxy:${ipHeader.srcIpStr}:${udpHeader.srcPort}->${ipHeader.dstIpStr}:${udpHeader.dstPort}"
         var session = sessions[key] as? ProxiedUdpSession
@@ -281,7 +288,9 @@ class UdpRelay(
         var rawSocket: Socket? = null
 
         try {
+            if (session.isClosed) return
             rawSocket = Socket()
+            session.socket = rawSocket
             check(protectSocket(rawSocket)) { "VPN socket protection failed" }
             rawSocket.tcpNoDelay = true
             rawSocket.keepAlive = true
@@ -323,6 +332,7 @@ class UdpRelay(
             }
             outStream.flush()
 
+            if (session.isClosed) { activeSocket.close(); return }
             session.socket = activeSocket
             session.outStream = outStream
             session.inStream = inStream
@@ -330,6 +340,8 @@ class UdpRelay(
 
             startProxiedUdpPumping(session, isWs)
         } catch (e: Exception) {
+            try { rawSocket?.close() } catch (_: Exception) {}
+            if (session.isClosed) return
             val errMsg = e.message ?: "UDP tunnel error"
             XrayLogManager.appendLog("Proxied UDP tunnel setup failed for $destIpStr:$destPort: $errMsg", "UDP")
             onTunnelError?.invoke(errMsg)
@@ -428,6 +440,8 @@ class UdpRelay(
         val bufferedOut = java.io.BufferedOutputStream(outStream, 65536)
         val bufferedIn = java.io.BufferedInputStream(inStream, 65536)
 
+        val writeLock = Any()
+
         // Upstream UDP sender
         session.writerJob = scope.launch(Dispatchers.IO) {
             try {
@@ -440,12 +454,9 @@ class UdpRelay(
                     packetBuffer[1] = (len and 0xFF).toByte()
                     System.arraycopy(payload, 0, packetBuffer, 2, len)
 
-                    if (isWs) {
-                        bufferedOut.write(WebSocketCodec.encodeFrame(packetBuffer))
-                    } else {
-                        bufferedOut.write(packetBuffer)
-                    }
-                    if (session.sendChannel.isEmpty) {
+                    synchronized(writeLock) {
+                        if (isWs) bufferedOut.write(WebSocketCodec.encodeFrame(packetBuffer))
+                        else bufferedOut.write(packetBuffer)
                         bufferedOut.flush()
                     }
                     session.lastActiveTime = System.currentTimeMillis()
@@ -458,83 +469,35 @@ class UdpRelay(
             }
         }
 
-        // Downstream UDP receiver
+        // Decode the VLESS stream across arbitrary WebSocket frame boundaries.
         session.readerJob = scope.launch(Dispatchers.IO) {
             try {
-                var isFirst = true
-                val headerBuf = ByteArray(2)
-
-                while (isActive && session.isConnected) {
-                    if (isWs) {
-                        val frame = WebSocketCodec.readFrame(bufferedIn) ?: break
-                        if (frame.isEmpty()) continue
-
-                        var offset = 0
-                        if (isFirst) {
-                            isFirst = false
-                            if (frame.size >= 2) {
-                                val addonLen = frame[1].toInt() and 0xFF
-                                offset = 2 + addonLen
-                            }
-                        }
-
-                        while (offset + 2 <= frame.size) {
-                            val chunkLen = ((frame[offset].toInt() and 0xFF) shl 8) or (frame[offset + 1].toInt() and 0xFF)
-                            offset += 2
-                            if (offset + chunkLen > frame.size) break
-                            val udpData = ByteArray(chunkLen)
-                            System.arraycopy(frame, offset, udpData, 0, chunkLen)
-                            offset += chunkLen
-
-                            session.lastActiveTime = System.currentTimeMillis()
-                            onTraffic(0L, udpData.size.toLong())
-
-                            val respIpPacket = PacketBuilder.buildUdpPacket(
-                                srcIp = session.serverIp,
-                                dstIp = session.clientIp,
-                                srcPort = session.serverPort,
-                                dstPort = session.clientPort,
-                                payload = udpData
-                            )
-                            sendToTun(respIpPacket)
-                        }
-                    } else {
-                        if (isFirst) {
-                            isFirst = false
-                            // 2-byte server response header
-                            readExact(bufferedIn, headerBuf, 2)
-                            val addonLen = headerBuf[1].toInt() and 0xFF
-                            if (addonLen > 0) {
-                                val addon = ByteArray(addonLen)
-                                readExact(bufferedIn, addon, addonLen)
-                            }
-                        }
-
-                        // Read 2-byte length
-                        readExact(bufferedIn, headerBuf, 2)
-                        val chunkLen = ((headerBuf[0].toInt() and 0xFF) shl 8) or (headerBuf[1].toInt() and 0xFF)
-                        if (chunkLen <= 0 || chunkLen > 65535) break
-
-                        val udpData = ByteArray(chunkLen)
-                        readExact(bufferedIn, udpData, chunkLen)
-
-                        session.lastActiveTime = System.currentTimeMillis()
-                        onTraffic(0L, udpData.size.toLong())
-
-                        val respIpPacket = PacketBuilder.buildUdpPacket(
-                            srcIp = session.serverIp,
-                            dstIp = session.clientIp,
-                            srcPort = session.serverPort,
-                            dstPort = session.clientPort,
-                            payload = udpData
-                        )
-                        sendToTun(respIpPacket)
+                val input = if (isWs) WebSocketInputStream(bufferedIn) { ping ->
+                    synchronized(writeLock) {
+                        bufferedOut.write(WebSocketCodec.encodeFrame(ping, 0xA))
+                        bufferedOut.flush()
                     }
+                } else bufferedIn
+                val header = ByteArray(2)
+                readExact(input, header, 2)
+                check(header[0] == 0.toByte()) { "Invalid VLESS response version" }
+                val addons = header[1].toInt() and 255
+                readExact(input, ByteArray(addons), addons)
+                while (isActive && session.isConnected) {
+                    readExact(input, header, 2)
+                    val length = ((header[0].toInt() and 255) shl 8) or (header[1].toInt() and 255)
+                    check(length <= 65507) { "UDP datagram exceeds IPv4 payload limit" }
+                    val payload = ByteArray(length)
+                    readExact(input, payload, length)
+                    session.lastActiveTime = System.currentTimeMillis()
+                    onTraffic(0L, payload.size.toLong())
+                    sendToTun(PacketBuilder.buildUdpPacket(session.serverIp, session.clientIp,
+                        session.serverPort, session.clientPort, payload))
                 }
             } catch (_: Exception) {
-                // Stream closed
+                // Stream closed or invalid framing.
             } finally {
-                sessions.remove(session.key)
+                sessions.remove(session.key, session)
                 session.close()
             }
         }

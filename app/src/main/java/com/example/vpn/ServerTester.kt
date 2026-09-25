@@ -28,6 +28,7 @@ object ServerTester {
     ): ServerTestResult = withContext(Dispatchers.IO) {
         try {
             VlessValidator.validate(profile)
+            com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
         } catch (e: Exception) {
             val msg = e.localizedMessage ?: "Invalid configuration"
             XrayLogManager.w("SERVER", "Validation check failed for '${profile.name}': $msg")

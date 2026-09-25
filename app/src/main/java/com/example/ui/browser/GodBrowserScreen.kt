@@ -48,6 +48,13 @@ fun GodBrowserScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewInstance?.apply { stopLoading(); destroy() }
+            webViewInstance = null
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -74,7 +81,7 @@ fun GodBrowserScreen(
                             }
                         }
                         Text(
-                            text = "Trackers Blocked: $blockedTrackerCount • DoH Enforced",
+                            text = "Trackers Blocked: $blockedTrackerCount • App traffic bypasses VPN",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -196,7 +203,7 @@ fun GodBrowserScreen(
                                 allowFileAccess = false
                                 allowContentAccess = false
                                 setGeolocationEnabled(false)
-                                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                 cacheMode = WebSettings.LOAD_NO_CACHE
                                 userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
                             }
@@ -212,7 +219,7 @@ fun GodBrowserScreen(
                                 ): WebResourceResponse? {
                                     val reqUrl = request?.url?.toString() ?: return null
                                     if (TrackerBlocker.isBlocked(reqUrl)) {
-                                        blockedTrackerCount++
+                                        view?.post { blockedTrackerCount++ }
                                         return WebResourceResponse("text/plain", "UTF-8", null)
                                     }
                                     return super.shouldInterceptRequest(view, request)
@@ -235,8 +242,8 @@ fun GodBrowserScreen(
                                 }
 
                                 override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
-                                    // Proceed with SSL handling in sandbox mode
-                                    handler?.proceed()
+                                    // Invalid certificates must never be accepted.
+                                    handler?.cancel()
                                 }
 
                                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {

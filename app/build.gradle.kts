@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.raytunnel.vpnrx"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "1.0.2"
+    versionCode = 4
+    versionName = "1.0.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -43,14 +43,12 @@ android {
     }
     debug { }
   }
-  splits {
-    abi {
-      isEnable = true
-      reset()
-      include("arm64-v8a")
-      isUniversalApk = true
-    }
+  // Build standalone packages. -PtargetAbi=arm64-v8a selects only ARM64 libraries.
+  providers.gradleProperty("targetAbi").orNull?.let { targetAbi ->
+    require(targetAbi in setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64"))
+    defaultConfig.ndk.abiFilters.add(targetAbi)
   }
+  packaging { jniLibs { useLegacyPackaging = true } }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
