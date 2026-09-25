@@ -24,7 +24,7 @@ object VlessValidator {
             throw VpnException.InvalidPort(profile.port)
         }
 
-        if (profile.uuid.isBlank()) {
+        if (profile.uuid.isBlank() && profile.protocolType !in listOf(com.example.data.model.ProtocolType.HTTP, com.example.data.model.ProtocolType.SOCKS5)) {
             throw VpnException.MissingUuid()
         }
 

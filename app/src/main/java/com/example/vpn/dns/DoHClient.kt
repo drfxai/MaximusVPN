@@ -18,6 +18,9 @@ class DoHClient(
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .callTimeout(8, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .writeTimeout(5, TimeUnit.SECONDS)
@@ -26,8 +29,11 @@ class DoHClient(
 
                 private fun protectOrThrow(socket: Socket) {
                     try {
-                        protectSocket?.invoke(socket)
-                    } catch (_: Exception) {}
+                        if (protectSocket?.invoke(socket) == false) throw IOException("DNS socket protection failed")
+                    } catch (e: Exception) {
+                        socket.close()
+                        throw IOException("DNS socket protection failed", e)
+                    }
                 }
 
                 override fun createSocket(): Socket {
@@ -81,7 +87,7 @@ class DoHClient(
      * Resolves a binary DNS wire query via DNS-over-HTTPS (DoH RFC 8484).
      */
     fun query(dohUrl: String, queryData: ByteArray): ByteArray? {
-        if (queryData.size < 12) return null
+        if (queryData.size < 12 || !dohUrl.startsWith("https://", ignoreCase = true)) return null
 
         return try {
             val requestBody = queryData.toRequestBody(dnsMessageMediaType)
@@ -94,8 +100,12 @@ class DoHClient(
 
             httpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    val responseBytes = response.body?.bytes()
-                    if (responseBytes != null && responseBytes.isNotEmpty()) {
+                    val responseBytes = response.body?.source()?.let { source ->
+                        val buffer = okio.Buffer()
+                        while (buffer.size < 65536L && source.read(buffer, 65536L - buffer.size) != -1L) { }
+                        buffer.readByteArray()
+                    }
+                    if (responseBytes != null && DnsResponse.isResponseTo(queryData, responseBytes)) {
                         responseBytes
                     } else null
                 } else {

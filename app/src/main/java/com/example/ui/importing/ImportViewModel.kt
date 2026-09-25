@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 data class ImportUiState(
     val rawTextInput: String = "",
@@ -46,14 +49,15 @@ class ImportViewModel(
 
         viewModelScope.launch {
             try {
-                val result = UniversalImportEngine.importText(
-                    rawText = rawContent,
-                    sourceFileName = fileName
-                )
+                val result = withContext(Dispatchers.Default) {
+                    UniversalImportEngine.importText(rawText = rawContent, sourceFileName = fileName)
+                }
                 _uiState.value = _uiState.value.copy(
                     isAnalyzing = false,
                     previewResult = result
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isAnalyzing = false,
@@ -77,6 +81,8 @@ class ImportViewModel(
                     previewResult = null,
                     importSuccessMessage = "Successfully imported ${inserted.size} new nodes (${duplicates.size} duplicates skipped)."
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(
                     errorMessage = "Failed to save configurations: ${e.localizedMessage}"

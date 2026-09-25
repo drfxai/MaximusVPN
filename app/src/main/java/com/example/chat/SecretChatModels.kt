@@ -18,7 +18,7 @@ data class SecretConversation(
     val unreadCount: Int = 0,
     val lastMessageText: String? = null,
     val lastMessageTime: Long = System.currentTimeMillis(),
-    val isVerifiedE2ee: Boolean = true
+    val isVerifiedE2ee: Boolean = false
 )
 
 data class SecretMessage(

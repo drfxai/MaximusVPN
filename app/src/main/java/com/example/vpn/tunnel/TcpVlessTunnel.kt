@@ -55,8 +55,9 @@ class TcpVlessTunnel(
         val serverIp: ByteArray,
         val clientPort: Int,
         val serverPort: Int,
-        var clientSeq: Long,
-        var ourSeq: Long,
+        @Volatile var clientSeq: Long,
+        @Volatile var ourSeq: Long,
+        var clientFin: Boolean = false,
         var protocolType: ProtocolType = ProtocolType.VLESS,
         var isWs: Boolean = false,
         var socket: Socket? = null,
@@ -65,7 +66,7 @@ class TcpVlessTunnel(
         @Volatile var isConnected: Boolean = false,
         @Volatile var isClosed: Boolean = false,
         @Volatile var lastActiveTime: Long = System.currentTimeMillis(),
-        val outgoingChannel: Channel<ByteArray> = Channel(Channel.UNLIMITED),
+        val outgoingChannel: Channel<ByteArray> = Channel(128),
         var writerJob: Job? = null,
         var readerJob: Job? = null
     )
@@ -129,15 +130,11 @@ class TcpVlessTunnel(
 
         session.lastActiveTime = System.currentTimeMillis()
 
-        if (tcpHeader.isFin) {
-            handleFin(session, tcpHeader)
-            return
-        }
-
         val payloadLen = tcpHeader.payloadLength
         if (payloadLen > 0) {
             handleData(session, tcpHeader, packetData)
         }
+        if (tcpHeader.isFin) handleFin(session, tcpHeader)
     }
 
     private fun handleSyn(
@@ -146,6 +143,13 @@ class TcpVlessTunnel(
         tcpHeader: TcpHeader,
         decision: RoutingDecision
     ) {
+        sessions[key]?.let { existing ->
+            val packet = PacketBuilder.buildTcpPacket(existing.serverIp, existing.clientIp,
+                existing.serverPort, existing.clientPort, TcpSequence.add(existing.ourSeq, -1),
+                existing.clientSeq, 0x12)
+            sendToTun(packet)
+            return
+        }
         val clientInitialSeq = tcpHeader.sequenceNumber
         val ourInitialSeq = isnGenerator.addAndGet(20000L)
 
@@ -155,7 +159,7 @@ class TcpVlessTunnel(
             serverIp = ipHeader.dstIp,
             clientPort = tcpHeader.srcPort,
             serverPort = tcpHeader.dstPort,
-            clientSeq = clientInitialSeq + 1,
+            clientSeq = TcpSequence.add(clientInitialSeq, 1),
             ourSeq = ourInitialSeq + 1
         )
         sessions[key] = session
@@ -185,14 +189,17 @@ class TcpVlessTunnel(
         packetData: ByteArray
     ) {
         val payloadLen = tcpHeader.payloadLength
-        if (payloadLen <= 0 || payloadLen > packetData.size) return
+        if (payloadLen <= 0 || tcpHeader.payloadOffset < 0 || tcpHeader.payloadOffset > packetData.size - payloadLen) return
 
-        val payload = ByteArray(payloadLen)
-        System.arraycopy(packetData, tcpHeader.payloadOffset, payload, 0, payloadLen)
-
-        val nextExpectedSeq = tcpHeader.sequenceNumber + payloadLen
-        if (nextExpectedSeq > session.clientSeq) {
-            session.clientSeq = nextExpectedSeq
+        if (!session.clientFin) {
+            val offset = TcpSequence.acceptedOffset(session.clientSeq, tcpHeader.sequenceNumber, payloadLen)
+            if (offset != null) {
+                val payload = packetData.copyOfRange(tcpHeader.payloadOffset + offset, tcpHeader.payloadOffset + payloadLen)
+                // Never acknowledge bytes we could not queue; the sender will retry.
+                if (session.outgoingChannel.trySend(payload).isSuccess) {
+                    session.clientSeq = TcpSequence.add(session.clientSeq, payload.size)
+                }
+            }
         }
 
         val ackPacket = PacketBuilder.buildTcpPacket(
@@ -207,28 +214,17 @@ class TcpVlessTunnel(
         )
         sendToTun(ackPacket)
 
-        session.outgoingChannel.trySend(payload)
     }
 
     private fun handleFin(session: TcpSession, tcpHeader: TcpHeader) {
-        val nextExpectedSeq = tcpHeader.sequenceNumber + 1
-        if (nextExpectedSeq > session.clientSeq) {
-            session.clientSeq = nextExpectedSeq
+        val finSeq = TcpSequence.add(tcpHeader.sequenceNumber, tcpHeader.payloadLength)
+        if (!session.clientFin && finSeq == session.clientSeq) {
+            session.clientSeq = TcpSequence.add(session.clientSeq, 1)
+            session.clientFin = true
+            session.outgoingChannel.close() // Drain queued upload before shutting down the write side.
         }
-
-        val finAckPacket = PacketBuilder.buildTcpPacket(
-            srcIp = session.serverIp,
-            dstIp = session.clientIp,
-            srcPort = session.serverPort,
-            dstPort = session.clientPort,
-            seq = session.ourSeq,
-            ack = session.clientSeq,
-            flags = 0x11, // FIN | ACK
-            windowSize = 65535
-        )
-        sendToTun(finAckPacket)
-
-        closeSession(session.key)
+        sendToTun(PacketBuilder.buildTcpPacket(session.serverIp, session.clientIp,
+            session.serverPort, session.clientPort, session.ourSeq, session.clientSeq, 0x10))
     }
 
     private fun sendRst(ipHeader: IPv4Header, tcpHeader: TcpHeader) {
@@ -253,8 +249,10 @@ class TcpVlessTunnel(
     ) {
         var rawSocket: Socket? = null
         try {
+            if (session.isClosed) return
             if (decision == RoutingDecision.DIRECT) {
                 rawSocket = Socket()
+                session.socket = rawSocket
                 check(protectSocket(rawSocket)) { "VPN socket protection failed" }
                 rawSocket.tcpNoDelay = true
                 rawSocket.keepAlive = true
@@ -264,6 +262,7 @@ class TcpVlessTunnel(
                 rawSocket.soTimeout = 0
                 rawSocket.connect(InetSocketAddress(destIpStr, destPort), 5000)
 
+                if (session.isClosed) { rawSocket.close(); return }
                 session.protocolType = ProtocolType.MIXED
                 session.isWs = false
                 session.socket = rawSocket
@@ -278,6 +277,7 @@ class TcpVlessTunnel(
             val targetProfile = profile ?: throw IllegalStateException("No active profile for proxy routing")
 
             rawSocket = Socket()
+            session.socket = rawSocket
             check(protectSocket(rawSocket)) { "VPN socket protection failed" }
             rawSocket.tcpNoDelay = true
             rawSocket.keepAlive = true
@@ -303,6 +303,7 @@ class TcpVlessTunnel(
                 WebSocketHandshake.perform(activeSocket, targetProfile)
             }
 
+            activeSocket.soTimeout = 10000
             // Protocol specific request header
             when (targetProfile.protocolType) {
                 ProtocolType.VLESS -> {
@@ -343,14 +344,12 @@ class TcpVlessTunnel(
                         if (line.isEmpty() || line == "\r") break
                     }
                 }
-                else -> {
-                    val uuidBytes = VlessHeader.uuidToBytes(targetProfile.uuid)
-                    val req = VlessHeader.encodeRequest(uuidBytes, VlessHeader.COMMAND_TCP, destPort, destIpStr)
-                    if (isWs) outStream.write(WebSocketCodec.encodeFrame(req)) else outStream.write(req)
-                }
+                else -> error("Unsupported proxy protocol")
             }
             outStream.flush()
 
+            activeSocket.soTimeout = 0
+            if (session.isClosed) { activeSocket.close(); return }
             session.protocolType = targetProfile.protocolType
             session.isWs = isWs
             session.socket = activeSocket
@@ -360,6 +359,8 @@ class TcpVlessTunnel(
 
             startPumping(session)
         } catch (e: Exception) {
+            try { rawSocket?.close() } catch (_: Exception) {}
+            if (session.isClosed) return
             val errMsg = e.message ?: "TCP tunnel error"
             XrayLogManager.appendLog("TCP tunnel error for $destIpStr:$destPort: $errMsg", "TCP")
             onTunnelError?.invoke(errMsg)
@@ -587,24 +588,23 @@ class TcpVlessTunnel(
         val bufferedOut = java.io.BufferedOutputStream(outStream, 65536)
         val bufferedIn = java.io.BufferedInputStream(inStream, 65536)
 
+        val writeLock = Any()
+
         // 1. Upstream Writer (Device -> Server / Upload stream)
         session.writerJob = scope.launch(Dispatchers.IO) {
             try {
                 for (chunk in session.outgoingChannel) {
                     if (session.isClosed || !session.isConnected) break
-                    if (session.isWs) {
-                        val framed = WebSocketCodec.encodeFrame(chunk)
-                        bufferedOut.write(framed)
-                    } else {
-                        bufferedOut.write(chunk)
-                    }
-                    if (session.outgoingChannel.isEmpty) {
+                    synchronized(writeLock) {
+                        if (session.isWs) bufferedOut.write(WebSocketCodec.encodeFrame(chunk))
+                        else bufferedOut.write(chunk)
                         bufferedOut.flush()
                     }
                     session.lastActiveTime = System.currentTimeMillis()
                     onTraffic(chunk.size.toLong(), 0L)
                 }
-                bufferedOut.flush()
+                synchronized(writeLock) { bufferedOut.flush() }
+                if (!session.isWs && session.clientFin) session.socket?.shutdownOutput()
             } catch (_: Exception) {
                 closeSession(session.key)
             }
@@ -622,7 +622,12 @@ class TcpVlessTunnel(
                 while (isActive && session.isConnected && !session.isClosed) {
                     var dataBytes: ByteArray
                     if (session.isWs) {
-                        val frame = WebSocketCodec.readFrame(bufferedIn) ?: break
+                        val frame = WebSocketCodec.readFrame(bufferedIn) { ping ->
+                            synchronized(writeLock) {
+                                bufferedOut.write(WebSocketCodec.encodeFrame(ping, 0xA))
+                                bufferedOut.flush()
+                            }
+                        } ?: break
                         if (frame.isEmpty()) continue
                         dataBytes = frame
                     } else {
@@ -638,6 +643,7 @@ class TcpVlessTunnel(
                         if (buffered.size < 2) {
                             continue
                         }
+                        check(buffered[0] == 0.toByte()) { "Invalid VLESS response version" }
                         val addonLen = buffered[1].toInt() and 0xFF
                         val targetHeaderLen = 2 + addonLen
                         if (buffered.size < targetHeaderLen) {
@@ -677,7 +683,7 @@ class TcpVlessTunnel(
                             payload = chunk
                         )
 
-                        session.ourSeq += chunkSize
+                        session.ourSeq = TcpSequence.add(session.ourSeq, chunkSize)
                         chunkOffset += chunkSize
                         sendToTun(dataPacket)
                     }
@@ -755,109 +761,5 @@ class TcpVlessTunnel(
         for (k in keys) {
             closeSession(k)
         }
-    }
-}
-
-object WebSocketCodec {
-    private val random = java.util.Random()
-
-    fun encodeFrame(payload: ByteArray): ByteArray {
-        val maskKey = ByteArray(4)
-        random.nextBytes(maskKey)
-        val len = payload.size
-        val out = java.io.ByteArrayOutputStream(len + 14)
-
-        out.write(0x82) // FIN + Binary Frame
-
-        when {
-            len <= 125 -> {
-                out.write(0x80 or len)
-            }
-            len <= 65535 -> {
-                out.write(0x80 or 126)
-                out.write((len shr 8) and 0xFF)
-                out.write(len and 0xFF)
-            }
-            else -> {
-                out.write(0x80 or 127)
-                for (i in 7 downTo 0) {
-                    out.write(((len.toLong() shr (i * 8)) and 0xFF).toInt())
-                }
-            }
-        }
-
-        out.write(maskKey)
-
-        val masked = ByteArray(len)
-        for (i in 0 until len) {
-            masked[i] = (payload[i].toInt() xor maskKey[i % 4].toInt()).toByte()
-        }
-        out.write(masked)
-        return out.toByteArray()
-    }
-
-    fun readFrame(inStream: InputStream): ByteArray? {
-        val b0 = inStream.read()
-        if (b0 == -1) return null
-        val opcode = b0 and 0x0F
-        val b1 = inStream.read()
-        if (b1 == -1) return null
-        val masked = (b1 and 0x80) != 0
-        var payloadLen = (b1 and 0x7F).toLong()
-
-        if (payloadLen == 126L) {
-            val len0 = inStream.read()
-            val len1 = inStream.read()
-            if (len0 == -1 || len1 == -1) return null
-            payloadLen = (((len0 and 0xFF) shl 8) or (len1 and 0xFF)).toLong()
-        } else if (payloadLen == 127L) {
-            payloadLen = 0L
-            for (i in 0 until 8) {
-                val b = inStream.read()
-                if (b == -1) return null
-                payloadLen = (payloadLen shl 8) or ((b and 0xFF).toLong())
-            }
-        }
-
-        val maskKey = if (masked) {
-            val k = ByteArray(4)
-            var read = 0
-            while (read < 4) {
-                val r = inStream.read(k, read, 4 - read)
-                if (r == -1) return null
-                read += r
-            }
-            k
-        } else null
-
-        if (opcode == 0x08) return null // Close frame
-        if (opcode == 0x09 || opcode == 0x0A) {
-            // Ping or Pong
-            var skipped = 0L
-            while (skipped < payloadLen) {
-                val s = inStream.skip(payloadLen - skipped)
-                if (s <= 0) break
-                skipped += s
-            }
-            return ByteArray(0)
-        }
-
-        if (payloadLen > 10 * 1024 * 1024) return null
-
-        val payload = ByteArray(payloadLen.toInt())
-        var totalRead = 0
-        while (totalRead < payloadLen.toInt()) {
-            val r = inStream.read(payload, totalRead, payloadLen.toInt() - totalRead)
-            if (r == -1) return null
-            totalRead += r
-        }
-
-        if (maskKey != null) {
-            for (i in payload.indices) {
-                payload[i] = (payload[i].toInt() xor maskKey[i % 4].toInt()).toByte()
-            }
-        }
-
-        return payload
     }
 }

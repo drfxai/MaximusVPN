@@ -39,13 +39,8 @@ class DnsManager(
                 return@withContext dohFallback
             }
 
-            // Do not silently downgrade to plaintext if user explicitly chose DoH, unless fallback is specified
-            if (fallbackDns.isNotBlank() && !fallbackDns.startsWith("https://")) {
-                val udpFallback = queryDo53(queryData, fallbackDns)
-                if (udpFallback != null) {
-                    logSuccess("$fallbackDns (Plaintext Fallback)")
-                    return@withContext udpFallback
-                }
+            if (fallbackDns.startsWith("https://", ignoreCase = true) && fallbackDns != primaryDns) {
+                dohClient.query(fallbackDns, queryData)?.let { return@withContext it }
             }
             return@withContext null
         }
@@ -77,21 +72,22 @@ class DnsManager(
         var socket: DatagramSocket? = null
         return try {
             socket = DatagramSocket()
-            try { protectDatagram(socket) } catch (_: Exception) {}
+            check(protectDatagram(socket)) { "DNS socket protection failed" }
             socket.soTimeout = 3000
 
             val inetAddress = InetAddress.getByName(serverIp)
+            socket.connect(inetAddress, 53)
             val packet = DatagramPacket(queryData, queryData.size, inetAddress, 53)
             socket.send(packet)
 
-            val buffer = ByteArray(2048)
+            val buffer = ByteArray(65535)
             val inPacket = DatagramPacket(buffer, buffer.size)
             socket.receive(inPacket)
 
             if (inPacket.length > 0) {
                 val result = ByteArray(inPacket.length)
                 System.arraycopy(buffer, 0, result, 0, inPacket.length)
-                result
+                result.takeIf { DnsResponse.isResponseTo(queryData, it) }
             } else null
         } catch (_: Exception) {
             null

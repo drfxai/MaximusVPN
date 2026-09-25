@@ -162,7 +162,9 @@ class TunnelManager(
     }
 
     private fun processPacket(buffer: ByteArray, length: Int) {
-        val ipHeader = IPv4Header.parse(buffer, 0) ?: return
+        val ipHeader = IPv4Header.parse(buffer, 0, length) ?: return
+        // Fragment reassembly is not implemented. Never interpret fragments as transport headers.
+        if ((ipHeader.flags and 0x3fff) != 0) return
 
         when (ipHeader.protocol) {
             IpProtocol.ICMP -> {
@@ -170,7 +172,7 @@ class TunnelManager(
             }
             IpProtocol.UDP -> {
                 val ipHeaderLen = ipHeader.ihl * 4
-                val udpHeader = UdpHeader.parse(buffer, ipHeaderLen, length) ?: return
+                val udpHeader = UdpHeader.parse(buffer, ipHeaderLen, ipHeader.totalLength) ?: return
                 if (udpHeader.dstPort == 53) {
                     dnsRelay?.handleDnsPacket(ipHeader, udpHeader, buffer)
                 } else {
@@ -179,7 +181,7 @@ class TunnelManager(
             }
             IpProtocol.TCP -> {
                 val ipHeaderLen = ipHeader.ihl * 4
-                val tcpHeader = TcpHeader.parse(buffer, 0, ipHeaderLen, length) ?: return
+                val tcpHeader = TcpHeader.parse(buffer, 0, ipHeaderLen, ipHeader.totalLength) ?: return
                 tcpTunnel?.handleTcpPacket(ipHeader, tcpHeader, buffer)
             }
             else -> {

@@ -403,13 +403,15 @@ fun SecretChatScreen(
                             OutlinedTextField(
                                 value = inputMessage,
                                 onValueChange = { inputMessage = it },
-                                placeholder = { Text("Encrypted message...", fontSize = 14.sp) },
+                                placeholder = { Text("Messaging unavailable: peer transport not integrated", fontSize = 12.sp) },
+                                enabled = false,
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(24.dp),
                                 maxLines = 4
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
+                                enabled = false,
                                 onClick = {
                                     if (inputMessage.isNotBlank() && activeConversation != null) {
                                         chatManager.sendMessage(activeConversation!!.id, inputMessage.trim())

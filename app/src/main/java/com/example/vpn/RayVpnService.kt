@@ -42,6 +42,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -71,6 +74,7 @@ class RayVpnService : VpnService() {
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val connectionMutex = Mutex()
     private var connectJob: Job? = null
     private var durationJob: Job? = null
     private var pingJob: Job? = null
@@ -94,7 +98,7 @@ class RayVpnService : VpnService() {
         super.onCreate()
         val db = AppDatabase.getInstance(applicationContext)
         serverRepository = ServerRepository(db.serverProfileDao())
-        settingsRepository = SettingsRepository(applicationContext)
+        settingsRepository = com.example.RayApplication.instance.settingsRepository
         createNotificationChannel()
         registerNetworkCallback()
         observeSettingsFlow()
@@ -217,7 +221,11 @@ class RayVpnService : VpnService() {
         return START_NOT_STICKY
     }
 
-    private suspend fun connect(profile: VlessProfile): Unit = withContext(Dispatchers.IO) {
+    private suspend fun connect(profile: VlessProfile): Unit = connectionMutex.withLock {
+        connectLocked(profile)
+    }
+
+    private suspend fun connectLocked(profile: VlessProfile): Unit = withContext(Dispatchers.IO) {
         try {
             disconnectResources()
 
@@ -259,6 +267,7 @@ class RayVpnService : VpnService() {
             // 3. Diagnostic step 3: Validate VLESS Profile Configuration
             try {
                 com.example.vless.VlessValidator.validate(profile)
+                com.example.vpn.engine.RuntimeCapabilities.requireSupported(profile)
             } catch (e: Exception) {
                 XrayLogManager.e("VPN", "Profile validation error: ${e.message}", e)
                 updateState(_vpnState.value.copy(
@@ -283,6 +292,7 @@ class RayVpnService : VpnService() {
             val builder = Builder()
                 .setSession("Maximus - ${profile.name}")
                 .setMtu(safeMtu)
+                .setBlocking(true)
                 .addAddress("172.19.0.1", 30)
                 .addRoute("0.0.0.0", 0)
 
@@ -411,7 +421,7 @@ class RayVpnService : VpnService() {
             tunnelManager = TunnelManager(
                 vpnInterface = pfd,
                 profile = profile,
-                settings = settings,
+                settings = settings.copy(mtu = safeMtu),
                 protectSocket = { socket -> safeProtectSocket(socket) },
                 protectDatagram = { datagramSocket -> safeProtectDatagram(datagramSocket) },
                 onTraffic = { sent, received ->
@@ -486,6 +496,9 @@ class RayVpnService : VpnService() {
 
             startDurationAndPingWatchers(profile, startTime)
 
+        } catch (e: CancellationException) {
+            disconnectResources()
+            throw e
         } catch (e: Exception) {
             XrayLogManager.e("VPN", "Fatal error establishing VPN connection: ${e.message}", e)
             updateState(_vpnState.value.copy(
@@ -500,20 +513,20 @@ class RayVpnService : VpnService() {
 
     private fun safeProtectSocket(socket: Socket): Boolean {
         try {
-            protect(socket)
+            return protect(socket)
         } catch (e: Exception) {
             XrayLogManager.d("SOCKET", "protect(Socket) exception: ${e.message}")
         }
-        return true
+        return false
     }
 
     private fun safeProtectDatagram(datagramSocket: DatagramSocket): Boolean {
         try {
-            protect(datagramSocket)
+            return protect(datagramSocket)
         } catch (e: Exception) {
             XrayLogManager.d("SOCKET", "protect(DatagramSocket) exception: ${e.message}")
         }
-        return true
+        return false
     }
 
     private fun startDurationAndPingWatchers(profile: VlessProfile, startTime: Long) {
@@ -567,7 +580,11 @@ class RayVpnService : VpnService() {
         }
     }
 
-    private suspend fun disconnect() = withContext(Dispatchers.IO) {
+    private suspend fun disconnect() = connectionMutex.withLock {
+        disconnectLocked()
+    }
+
+    private suspend fun disconnectLocked() = withContext(Dispatchers.IO) {
         XrayLogManager.appendLog("Initiating clean VPN disconnection...", "VPN")
         updateState(_vpnState.value.copy(status = ConnectionStatus.DISCONNECTING))
 
@@ -741,6 +758,8 @@ class RayVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        connectJob?.cancel()
+        serviceScope.coroutineContext[Job]?.cancel()
         settingsObserverJob?.cancel()
         settingsObserverJob = null
         disconnectResources()

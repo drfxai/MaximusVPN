@@ -23,13 +23,14 @@ object SmartConnect {
         if (profiles.isEmpty()) return null
 
         // Filter for eligible nodes (exclude known offline or high-loss nodes)
-        val healthyProfiles = profiles.filter {
+        val supportedProfiles = profiles.filter { com.example.vpn.engine.RuntimeCapabilities.unsupportedReason(it) == null }
+        val healthyProfiles = supportedProfiles.filter {
             it.category != ServerCategory.OFFLINE &&
             it.packetLoss < 40.0 &&
             (it.lastLatencyMs == null || it.lastLatencyMs > 0)
         }
 
-        val pool = if (healthyProfiles.isNotEmpty()) healthyProfiles else profiles
+        val pool = if (healthyProfiles.isNotEmpty()) healthyProfiles else supportedProfiles
 
         // Sort: Favorite bonus, then overallScore desc, stability desc, latency asc (lower is better)
         val best = pool.maxWithOrNull(
@@ -39,8 +40,8 @@ object SmartConnect {
                 .thenBy { -(it.lastLatencyMs ?: 9999L) }
         ) ?: return null
 
-        val pingStr = if (best.lastLatencyMs != null && best.lastLatencyMs > 0) "${best.lastLatencyMs} ms" else "Fast"
-        val dlStr = if (best.downloadMbps > 0) "%.1f Mbps".format(best.downloadMbps) else "High Speed"
+        val pingStr = if (best.lastLatencyMs != null && best.lastLatencyMs > 0) "${best.lastLatencyMs} ms" else "Not measured"
+        val dlStr = if (best.downloadMbps > 0) "%.1f Mbps".format(best.downloadMbps) else "Not measured"
         val stabStr = "%.0f%%".format(best.stability)
         val lossStr = "%.1f%%".format(best.packetLoss)
 
@@ -59,7 +60,7 @@ object SmartConnect {
         }
 
         val stabRating = when {
-            best.stability >= 95.0 -> "Rock Solid (98%)"
+            best.stability >= 95.0 -> "${best.stability.toInt()}%"
             best.stability >= 85.0 -> "Very High (${best.stability.toInt()}%)"
             else -> "Stable (${best.stability.toInt()}%)"
         }

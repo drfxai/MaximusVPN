@@ -34,10 +34,11 @@ class DnsRelay(
         packetData: ByteArray
     ) {
         val payloadLen = udpHeader.payloadLength
-        if (payloadLen <= 0 || payloadLen > packetData.size) return
+        if (payloadLen <= 0 || udpHeader.payloadOffset < 0 || udpHeader.payloadOffset > packetData.size - payloadLen) return
 
         // Guard against unbounded coroutine / socket explosion
-        if (activeDnsQueries.get() >= MAX_CONCURRENT_DNS_QUERIES) {
+        if (activeDnsQueries.incrementAndGet() > MAX_CONCURRENT_DNS_QUERIES) {
+            activeDnsQueries.decrementAndGet()
             return
         }
 
@@ -51,7 +52,6 @@ class DnsRelay(
 
         val targetDns = if (defaultDnsServer.isNotBlank()) defaultDnsServer else "https://8.8.8.8/dns-query"
 
-        activeDnsQueries.incrementAndGet()
         scope.launch(Dispatchers.IO) {
             try {
                 onTraffic(dnsQueryData.size.toLong(), 0L)
