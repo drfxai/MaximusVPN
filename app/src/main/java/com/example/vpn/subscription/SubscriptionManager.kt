@@ -225,7 +225,9 @@ class SubscriptionManager(
                 // Deduplicate and insert into database
                 val (inserted, duplicates) = serverRepository.insertAllWithDeduplication(importResult.validProfiles)
 
-                val newNodeCount = inserted.size
+                val newNodeCount = serverRepository.getAllProfilesOnce().count {
+                    it.sourceSubscription == subscription.url || it.subscriptionUrl == subscription.url
+                }
                 subscriptionRepository.updateSyncStatus(
                     id = subscription.id,
                     nodeCount = newNodeCount,
@@ -248,6 +250,8 @@ class SubscriptionManager(
                     errorMessage = null
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             val errMsg = e.localizedMessage ?: "Network connection failure"
             XrayLogManager.e("SUBSCRIPTION", "Error syncing '${subscription.name}': $errMsg")
