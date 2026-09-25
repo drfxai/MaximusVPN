@@ -31,7 +31,7 @@ class XrayEngineImpl private constructor() : XrayEngine {
 
     companion object {
         val instance: XrayEngine by lazy { XrayEngineImpl() }
-        const val ENGINE_VERSION = "Xray-core 1.8.24 (RayTunnel Unified)"
+        const val ENGINE_VERSION = "Maximus Kotlin tunnel (Xray configuration adapter; no native Xray runtime)"
     }
 
     override val engineType: EngineType = EngineType.XRAY
@@ -80,35 +80,22 @@ class XrayEngineImpl private constructor() : XrayEngine {
             stop()
         }
 
-        XrayLogManager.appendLog("Initializing Xray-core engine with version: $ENGINE_VERSION", "ENGINE")
+        XrayLogManager.appendLog("Initializing configuration adapter: $ENGINE_VERSION", "ENGINE")
 
         try {
-            // Verify JSON validity
-            try {
-                org.json.JSONObject(configJson)
-                XrayLogManager.appendLog("Configuration JSON syntax validated successfully.", "ENGINE")
-            } catch (_: Exception) {}
+            org.json.JSONObject(configJson)
+            XrayLogManager.appendLog("Configuration JSON syntax validated successfully.", "ENGINE")
 
             txBytesCounter.set(0)
             rxBytesCounter.set(0)
             lastTxBytes = 0L
             lastRxBytes = 0L
 
-            // Check if native libxray library is available dynamically
-            val nativeLoaded = tryLoadNativeXray(configJson)
-
-            if (!nativeLoaded) {
-                XrayLogManager.appendLog(
-                    "Native libxray core is not installed on this device. Pure-Kotlin VLESS TunnelEngine will route traffic.",
-                    "CORE"
-                )
-            } else {
-                XrayLogManager.appendLog("Native Xray-core library initialized and running.", "NATIVE")
-            }
+            XrayLogManager.appendLog("Using the Kotlin TunnelManager; native Xray execution is not integrated.", "CORE")
 
             isRunningFlag.set(true)
             startStatsMonitor()
-            XrayLogManager.appendLog("Xray engine service started successfully.", "ENGINE")
+            XrayLogManager.appendLog("Configuration adapter ready; TUN forwarding starts separately.", "ENGINE")
             return AppResult.Success(Unit)
         } catch (e: Exception) {
             isRunningFlag.set(false)
@@ -117,17 +104,6 @@ class XrayEngineImpl private constructor() : XrayEngine {
                 VpnException.XrayStartupFailed(e.message ?: "Unknown startup failure", e),
                 "Failed to initialize Xray engine: ${e.localizedMessage}"
             )
-        }
-    }
-
-    private fun tryLoadNativeXray(config: String): Boolean {
-        return try {
-            System.loadLibrary("xray")
-            true
-        } catch (_: UnsatisfiedLinkError) {
-            false
-        } catch (_: Exception) {
-            false
         }
     }
 

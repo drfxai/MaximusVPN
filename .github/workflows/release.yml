@@ -1,6 +1,9 @@
 name: Signed Android release
 
 on:
+  push:
+    branches: [main]
+    paths: [release-version.txt]
   workflow_dispatch:
     inputs:
       tag:
@@ -68,5 +71,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          if [ -z "$RELEASE_TAG" ]; then RELEASE_TAG=$(cat release-version.txt); fi
           case "$RELEASE_TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo 'Expected semver tag such as v1.0.1'; exit 1 ;; esac
           gh release create "$RELEASE_TAG" arm64-v8a.apk app-release.apk SHA256SUMS --target "$GITHUB_SHA" --title "Maximus VPN $RELEASE_TAG" --notes "Signed Android APKs: arm64-v8a.apk for ARM64 devices and app-release.apk for other supported devices. Verify downloads with SHA256SUMS."

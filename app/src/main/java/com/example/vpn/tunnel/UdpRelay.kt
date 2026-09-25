@@ -282,7 +282,7 @@ class UdpRelay(
 
         try {
             rawSocket = Socket()
-            try { protectSocket(rawSocket) } catch (_: Exception) {}
+            check(protectSocket(rawSocket)) { "VPN socket protection failed" }
             rawSocket.tcpNoDelay = true
             rawSocket.keepAlive = true
             try { rawSocket.receiveBufferSize = 524288 } catch (_: Exception) {}
@@ -304,47 +304,7 @@ class UdpRelay(
 
             val isWs = targetProfile.transport.equals("ws", ignoreCase = true)
             if (isWs) {
-                val wsHost = if (targetProfile.host.isNotBlank()) targetProfile.host else targetProfile.sni.ifBlank { targetProfile.address }
-                val wsPath = if (targetProfile.path.isNotBlank()) {
-                    if (targetProfile.path.startsWith("/")) targetProfile.path else "/${targetProfile.path}"
-                } else "/"
-                val randomBytes = ByteArray(16).apply { java.security.SecureRandom().nextBytes(this) }
-                val wsKey = java.util.Base64.getEncoder().encodeToString(randomBytes)
-
-                val wsHandshake = buildString {
-                    append("GET $wsPath HTTP/1.1\r\n")
-                    append("Host: $wsHost\r\n")
-                    append("Upgrade: websocket\r\n")
-                    append("Connection: Upgrade\r\n")
-                    append("Sec-WebSocket-Key: $wsKey\r\n")
-                    append("Sec-WebSocket-Version: 13\r\n")
-                    append("User-Agent: Mozilla/5.0 (Android; Maximus)\r\n")
-                    append("\r\n")
-                }
-                outStream.write(wsHandshake.toByteArray(Charsets.UTF_8))
-                outStream.flush()
-
-                // Read HTTP 101
-                val headerLine = readHttpLine(inStream)
-                if (headerLine.contains("301") || headerLine.contains("302")) {
-                    var location = ""
-                    while (true) {
-                        val line = readHttpLine(inStream)
-                        if (line.isEmpty() || line == "\r") break
-                        if (line.startsWith("Location:", ignoreCase = true)) {
-                            location = line.substringAfter(":").trim()
-                        }
-                    }
-                    val locInfo = if (location.isNotBlank()) " (Location: $location)" else ""
-                    throw IllegalStateException("WebSocket redirect detected for UDP tunnel: $headerLine$locInfo")
-                }
-                if (!headerLine.contains("101")) {
-                    throw IllegalStateException("WebSocket handshake failed for UDP tunnel: $headerLine")
-                }
-                while (true) {
-                    val line = readHttpLine(inStream)
-                    if (line.isEmpty() || line == "\r") break
-                }
+                WebSocketHandshake.perform(activeSocket, targetProfile)
             }
 
             // Send VLESS UDP Request Header
@@ -443,7 +403,8 @@ class UdpRelay(
         ) as SSLSocket
 
         val params = SSLParameters()
-        if (sniHost.isNotBlank()) {
+        if (!isReality && !isUnsafe) params.endpointIdentificationAlgorithm = "HTTPS"
+        if (sniHost.isNotBlank() && !sniHost.contains(':') && !sniHost.matches(Regex("[0-9.]+"))) {
             params.serverNames = listOf(javax.net.ssl.SNIHostName(sniHost))
         }
         val supportedProtocols = sslSocket.supportedProtocols.toList()
@@ -455,7 +416,9 @@ class UdpRelay(
         }
 
         sslSocket.sslParameters = params
+        sslSocket.soTimeout = 10000
         sslSocket.startHandshake()
+        sslSocket.soTimeout = 0
         return sslSocket
     }
 

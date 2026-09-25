@@ -31,3 +31,13 @@ After CI passes on `main`, run **Actions → Signed Android release → Run work
 ## Security status
 
 The VPN uses Android `VpnService` and a Kotlin tunnel path. Configuration compatibility with Xray and Mihomo does not by itself mean their native engines are embedded. The secret chat implementation has not completed authenticated key exchange or peer transport and should not be relied upon for private messaging. Validate DNS, IPv6, failover, and lockdown behavior on real Android devices before presenting a release as production secure.
+
+## v1.0.2 diagnostic corrections
+
+Health checks validate endpoint transport (TCP, TLS, and WebSocket), not VLESS authentication or end-to-end internet access. A WebSocket HTTP 404 requires checking the provider's Host, path, SNI and endpoint settings; a reachable TCP port alone is not a working WebSocket proxy.
+
+Benchmarks use the same transport validation and count unsuccessful samples. Download/upload throughput is unmeasured (stored as zero), and no direct internet speed test or synthetic speed is attributed to a node. Historical benchmark scores from older builds should be refreshed. Failover messages distinguish the configured latency policy from proven availability.
+
+Diagnostics display the build version and Kotlin forwarding runtime. Native Xray execution is not integrated. DNS leak tests, DoH runtime verification and end-to-end connectivity are not inferred from settings or a TUN interface.
+
+To publish without the manual Actions form, update the app version and `release-version.txt` together in a reviewed change to `main`. A change to that file starts the same signed release workflow; use a new tag each time. Release assets include `arm64-v8a.apk`, `app-release.apk`, `SHA256SUMS`, and GitHub's source archives.

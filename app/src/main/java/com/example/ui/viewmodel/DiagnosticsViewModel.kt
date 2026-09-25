@@ -80,8 +80,8 @@ class DiagnosticsViewModel(
 
         val uiState = "HEALTHY (Compose M3)"
         val vpnState = if (conn.isConnected) "CONNECTED (${conn.vpnIp})" else "IDLE (Ready)"
-        val dnsState = if (settings.dnsServer.startsWith("https://")) "SECURE (DoH Active)" else "STANDARD (${settings.dnsServer})"
-        val routingState = "OPTIMAL (${settings.routingMode.title})"
+        val dnsState = if (settings.dnsServer.startsWith("https://")) "DoH configured; runtime status not measured" else "STANDARD (${settings.dnsServer})"
+        val routingState = "Configured: ${settings.routingMode.title}; routing not tested"
 
         val health = SubsystemHealth(
             uiState = uiState,
@@ -103,26 +103,26 @@ class DiagnosticsViewModel(
         val profile = conn.activeProfile
 
         val profileSummary = if (profile != null) {
-            "${profile.name} (${profile.address}:${profile.port} • ${profile.transport.uppercase()}/${profile.security.uppercase()})"
+            "${profile.name} (${profile.address}:${profile.port} • ${profile.transport.uppercase()}/${profile.security.ifBlank { "none" }.uppercase()})"
         } else {
             "No active server connected"
         }
 
-        val engineName = profile?.engineType?.displayName ?: "Xray-core"
-        val protocolName = profile?.protocolType?.displayName ?: "VLESS"
+        val engineName = if (conn.isVpnInterfaceActive) "Maximus Kotlin TunnelManager" else "Inactive"
+        val protocolName = profile?.protocolType?.displayName ?: "None"
 
         return DiagnosticReport(
-            appVersion = "Maximus v1.0.0 (by DrFXAi)",
-            vpnServiceRunning = conn.status == ConnectionStatus.CONNECTED,
+            appVersion = "Maximus v${com.example.BuildConfig.VERSION_NAME} (${com.example.BuildConfig.VERSION_CODE}, by DrFXAi)",
+            vpnServiceRunning = conn.isVpnInterfaceActive,
             activeEngine = engineName,
             activeServerSummary = profileSummary,
             activeProtocol = protocolName,
             routingMode = settings.routingMode.title,
             dnsServer = settings.dnsServer,
-            dohWorking = settings.dnsServer.startsWith("https://"),
-            dnsLeakDetected = false,
-            resolverIp = conn.vpnIp,
-            networkType = if (conn.isConnected) "Encrypted Tunnel (172.19.0.1)" else "Direct Interface",
+            dohWorking = null,
+            dnsLeakDetected = null,
+            resolverIp = null,
+            networkType = if (conn.isVpnInterfaceActive) "Android TUN (${conn.vpnIp ?: "unknown"}); end-to-end connectivity not tested" else "Direct Interface",
             lastLatencyMs = conn.pingMs,
             connectionState = conn.status.name,
             sanitizedLogs = XrayLogManager.getLogs(),
@@ -143,12 +143,13 @@ class DiagnosticsViewModel(
         sb.appendLine("VPN Service Status: ${if (report.vpnServiceRunning) "ACTIVE (TUN ESTABLISHED)" else "INACTIVE"}")
         sb.appendLine("Active Core Engine: ${report.activeEngine}")
         sb.appendLine("Active Protocol: ${report.activeProtocol}")
-        sb.appendLine("Engine Binary: ${xrayEngine.getVersion()}")
+        sb.appendLine("Native Engine: Not integrated; forwarding uses Kotlin")
         sb.appendLine("Connection State: ${report.connectionState}")
         sb.appendLine("Active Server: ${report.activeServerSummary}")
-        sb.appendLine("Routing Mode: ${report.routingMode}")
+        sb.appendLine("Configured Routing Mode: ${report.routingMode}")
         sb.appendLine("Configured DNS: ${report.dnsServer}")
-        sb.appendLine("DoH Active: ${report.dohWorking}")
+        sb.appendLine("DoH Runtime Verification: ${report.dohWorking?.toString() ?: "Not measured"}")
+        sb.appendLine("DNS Leak Test: ${report.dnsLeakDetected?.toString() ?: "Not performed"}")
         sb.appendLine("Network Type: ${report.networkType}")
         sb.appendLine("Latency: ${report.lastLatencyMs?.let { "${it}ms" } ?: "N/A"}")
         if (report.lastError != null) {
@@ -165,6 +166,6 @@ class DiagnosticsViewModel(
         sb.appendLine("==========================================")
         sb.appendLine("END OF DIAGNOSTIC REPORT")
         sb.appendLine("==========================================")
-        return sb.toString()
+        return SecretRedactor.redact(sb.toString())
     }
 }

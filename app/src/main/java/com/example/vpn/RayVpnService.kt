@@ -400,6 +400,7 @@ class RayVpnService : VpnService() {
                 protectDatagram = { dSocket: DatagramSocket -> safeProtectDatagram(dSocket) }
             )
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 7. Proxy engine start result: $startResult.")
+            if (startResult is com.example.core.AppResult.Error) throw startResult.exception
 
             if (!coroutineContext.isActive) {
                 disconnectResources()

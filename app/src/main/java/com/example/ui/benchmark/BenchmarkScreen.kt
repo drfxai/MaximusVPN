@@ -387,7 +387,7 @@ private fun BenchmarkResultItem(result: BenchmarkStageResult) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (result.isSuccess) "${result.pingMs} ms Ping • %.1f Mbps".format(result.downloadMbps) else "Offline / Timeout",
+                        text = if (result.isSuccess) "${result.pingMs} ms transport • throughput not measured" else "Offline / Timeout",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                         color = if (result.isSuccess) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
