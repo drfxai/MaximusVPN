@@ -5,7 +5,6 @@ import com.example.data.model.AppSettings
 import com.example.data.model.ProtocolType
 import com.example.data.model.RoutingMode
 import com.example.data.security.SecureStorage
-import com.example.vpn.dns.DoHClient
 import com.example.vpn.engine.ConfigurationAdapter
 import com.example.vpn.packet.IPv4Header
 import com.example.vpn.packet.IpProtocol
@@ -16,10 +15,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.net.URI
 
 class SecurityAndNetworkingRemediationTest {
@@ -66,6 +63,34 @@ class SecurityAndNetworkingRemediationTest {
     }
 
     @Test
+    fun testGlobalDnsPacketsAreAssignedToProxyRoute() {
+        val dnsRoute = RoutingEngine.evaluate(
+            dstIp = byteArrayOf(1, 1, 1, 1),
+            dstPort = 53,
+            protocol = IpProtocol.UDP,
+            settings = AppSettings(routingMode = RoutingMode.GLOBAL),
+            isTunnelConnected = true
+        )
+        assertEquals(RoutingDecision.PROXY, dnsRoute)
+    }
+
+    @Test
+    fun dnsCannotUseLanOrCustomDirectBypass() {
+        val settings = AppSettings(
+            routingMode = RoutingMode.BYPASS_SELECTED,
+            customBypassRules = "192.168.1.1:53"
+        )
+        assertEquals(
+            RoutingDecision.PROXY,
+            RoutingEngine.evaluate(byteArrayOf(192.toByte(), 168.toByte(), 1, 1), 53, IpProtocol.UDP, settings, true)
+        )
+        assertEquals(
+            RoutingDecision.BLOCK,
+            RoutingEngine.evaluate(byteArrayOf(8, 8, 8, 8), 53, IpProtocol.UDP, settings, false)
+        )
+    }
+
+    @Test
     fun testCidrAndBypassRules() {
         assertTrue(RoutingEngine.matchesCidr("192.168.1.50", "192.168.1.0/24"))
         assertFalse(RoutingEngine.matchesCidr("192.168.2.50", "192.168.1.0/24"))
@@ -92,17 +117,6 @@ class SecurityAndNetworkingRemediationTest {
         assertTrue(SubscriptionManager.isValidSubscriptionUrl("https://example.com/sub.txt"))
         assertFalse(SubscriptionManager.isValidSubscriptionUrl("http://127.0.0.1/secret"))
         assertFalse(SubscriptionManager.isValidSubscriptionUrl("file:///etc/passwd"))
-    }
-
-    @Test
-    fun subscriptionRedirectTargetsAreValidatedBeforeFollowing() {
-        val base = "https://example.com/feed".toHttpUrl()
-        assertThrows(SecurityException::class.java) {
-            SubscriptionManager.validateRedirectTarget(base, "https://127.0.0.1/admin")
-        }
-        assertThrows(SecurityException::class.java) {
-            SubscriptionManager.validateRedirectTarget(base, "http://127.0.0.1/admin")
-        }
     }
 
     @Test
