@@ -2,6 +2,10 @@
 
 Native Android VPN application. The installable APK is published under [GitHub Releases](https://github.com/drfxai/MaximusVPN/releases) after a signed release build succeeds. Do not install an APK from an untrusted mirror.
 
+## v1.0.9
+
+Classic DNS packets are forced through the proxy route on the Kotlin compatibility path and are blocked if no tunnel is available; DNS does not fall back to a direct protected socket. IPv6 is routed only through engines that forward IPv6, and the Android VPN service advertises Always-on support. For disconnect lockdown, users must enable Android's **Always-on VPN** and **Block connections without VPN** settings. Plain VLESS without TLS is not confidential on the client-to-server hop; use TLS or REALITY for transport encryption.
+
 ## v1.0.8
 
 Plain VLESS over TCP now uses the Kotlin tunnel compatibility path, avoiding the Xray-core startup rejection for unencrypted VLESS profiles. TLS and REALITY VLESS profiles continue to use the native Xray core.
