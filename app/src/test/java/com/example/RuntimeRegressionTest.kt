@@ -25,6 +25,14 @@ class RuntimeRegressionTest {
         assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(protocolType=ProtocolType.VMESS)))
     }
 
+    @Test fun ipv6IsOnlyEnabledForEnginesThatForwardIpv6Packets() {
+        assertTrue(EngineSelectionPolicy.usesKotlinPacketTunnel(node))
+        assertTrue(EngineSelectionPolicy.usesKotlinPacketTunnel(node.copy(security="none")))
+        assertTrue(EngineSelectionPolicy.usesKotlinPacketTunnel(node.copy(protocolType=ProtocolType.HTTP, uuid="")))
+        assertTrue(EngineSelectionPolicy.usesKotlinPacketTunnel(node.copy(protocolType=ProtocolType.SOCKS5, uuid="")))
+        assertFalse(EngineSelectionPolicy.usesKotlinPacketTunnel(node.copy(security="tls")))
+    }
+
     @Test fun unsupportedProfilesCannotMasqueradeAsWorkingTunnels() {
         assertNull(RuntimeCapabilities.unsupportedReason(node))
         assertNotNull(RuntimeCapabilities.unsupportedReason(node.copy(security="reality")))
