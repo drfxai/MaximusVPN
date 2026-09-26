@@ -324,6 +324,29 @@ fun HomeScreen(
             LatencyPill(latencyMs = connectionState.pingMs ?: activeProfile?.lastLatencyMs)
         }
 
+        val connectedProfile = connectionState.activeProfile ?: activeProfile
+        if (connectionState.isConnected && connectedProfile?.security?.let { it.isBlank() || it.equals("none", ignoreCase = true) } == true) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF3A2410)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.55f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFFB74D))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "This profile has no TLS/REALITY encryption between this device and the VPN server. Use a TLS or REALITY profile for a confidential connection.",
+                        color = AppTheme.colors.textPrimary,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         // Smart Connect Hero Card
@@ -414,7 +437,7 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (connectionState.isConnected) "PROTECTED TUNNEL" else "DISCONNECTED",
+                        text = if (connectionState.isConnected) "VPN CONNECTED" else "DISCONNECTED",
                         color = if (connectionState.isConnected) AppTheme.colors.statusConnected else AppTheme.colors.textSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

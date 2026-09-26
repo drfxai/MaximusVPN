@@ -3,8 +3,12 @@ package com.example.vpn.engine
 import com.example.data.model.ProtocolType
 import com.example.data.model.VlessProfile
 
-/** Selects the Kotlin packet tunnel for plaintext VLESS profiles that recent Xray cores reject on public IPs. */
+/** Describes profiles forwarded by the Kotlin packet loop instead of the native Xray TUN. */
 object EngineSelectionPolicy {
+    /** Profiles forwarded by TunnelManager, which currently understands IPv4 packets only. */
+    fun usesKotlinPacketTunnel(profile: VlessProfile): Boolean =
+        requiresKotlinTunnel(profile) || profile.protocolType in setOf(ProtocolType.HTTP, ProtocolType.SOCKS5)
+
     fun requiresKotlinTunnel(profile: VlessProfile): Boolean =
         profile.protocolType == ProtocolType.VLESS &&
             profile.transport.equals("tcp", ignoreCase = true) &&

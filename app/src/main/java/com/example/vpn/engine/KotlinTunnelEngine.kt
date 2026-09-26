@@ -20,7 +20,7 @@ class KotlinTunnelEngine private constructor() : VpnEngine {
     }
 
     override val engineType: EngineType = EngineType.XRAY
-    override val engineVersion: String = "Maximus Kotlin TunnelManager (plaintext VLESS/HTTP/SOCKS compatibility)"
+    override val engineVersion: String = "Maximus Kotlin TunnelManager (plaintext VLESS/HTTP/SOCKS compatibility; IPv4 only)"
     private val running = AtomicBoolean(false)
     private val tx = AtomicLong(0)
     private val rx = AtomicLong(0)

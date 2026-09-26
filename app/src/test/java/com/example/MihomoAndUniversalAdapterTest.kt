@@ -3,7 +3,6 @@ package com.example
 import com.example.data.model.EngineType
 import com.example.data.model.ProtocolType
 import com.example.mihomo.MihomoParser
-import com.example.vpn.dns.DoHClient
 import com.example.vpn.engine.ConfigurationAdapter
 import com.example.vpn.engine.UniversalImportEngine
 import com.example.xray.XrayConfigParser
