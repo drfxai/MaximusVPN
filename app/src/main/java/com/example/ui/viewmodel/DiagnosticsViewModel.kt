@@ -107,7 +107,7 @@ class DiagnosticsViewModel(
         val uiState = "HEALTHY (Compose M3)"
         val vpnState = if (conn.isConnected) "CONNECTED (${conn.vpnIp})" else "IDLE (Ready)"
         val dnsState = when {
-            conn.activeEngineName.contains("Kotlin", ignoreCase = true) ->
+            conn.activeEngineName.orEmpty().contains("Kotlin", ignoreCase = true) ->
                 "DNS/UDP follows the VLESS route; DoH provider setting is not used on the Kotlin compatibility path; live leak test not performed"
             settings.dnsServer.startsWith("https://") -> "DoH configured for native Xray; runtime status not measured"
             else -> "STANDARD (${settings.dnsServer}); runtime status not measured"
