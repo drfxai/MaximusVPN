@@ -13,14 +13,14 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/** Lifecycle and counters for HTTP CONNECT/SOCKS nodes forwarded by TunnelManager. */
+/** Lifecycle and counters for compatibility profiles forwarded by TunnelManager. */
 class KotlinTunnelEngine private constructor() : VpnEngine {
     companion object {
         val instance: VpnEngine by lazy { KotlinTunnelEngine() }
     }
 
     override val engineType: EngineType = EngineType.XRAY
-    override val engineVersion: String = "Maximus Kotlin TunnelManager (HTTP/SOCKS5 compatibility)"
+    override val engineVersion: String = "Maximus Kotlin TunnelManager (plaintext VLESS/HTTP/SOCKS compatibility)"
     private val running = AtomicBoolean(false)
     private val tx = AtomicLong(0)
     private val rx = AtomicLong(0)
