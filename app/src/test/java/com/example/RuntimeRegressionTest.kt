@@ -3,6 +3,7 @@ package com.example
 import com.example.data.model.*
 import com.example.vless.VlessValidator
 import com.example.vpn.engine.RuntimeCapabilities
+import com.example.vpn.engine.EngineSelectionPolicy
 import com.example.vpn.packet.*
 import com.example.vpn.tunnel.*
 import com.example.vpn.dns.DnsResponse
@@ -13,6 +14,16 @@ import java.io.ByteArrayOutputStream
 
 class RuntimeRegressionTest {
     private val node = VlessProfile(name="test", address="example.invalid", port=443, uuid="00000000-0000-0000-0000-000000000001")
+
+    @Test fun plaintextTcpVlessUsesCompatibilityTunnelAndEncryptedVlessKeepsNativeCore() {
+        assertTrue(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(address="45.63.91.162")))
+        assertTrue(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(address="45.63.91.162", security="NONE")))
+        assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(security="tls")))
+        assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(security="reality")))
+        assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(transport="ws")))
+        assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(flow="xtls-rprx-vision")))
+        assertFalse(EngineSelectionPolicy.requiresKotlinTunnel(node.copy(protocolType=ProtocolType.VMESS)))
+    }
 
     @Test fun unsupportedProfilesCannotMasqueradeAsWorkingTunnels() {
         assertNull(RuntimeCapabilities.unsupportedReason(node))
