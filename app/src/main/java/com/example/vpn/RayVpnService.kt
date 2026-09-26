@@ -161,8 +161,29 @@ class RayVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: return START_NOT_STICKY
-        val profileId = intent.getStringExtra(EXTRA_PROFILE_ID)
+        val action = intent?.action
+        if (action == null) {
+            // Android can restart an Always-on VPN with a null intent after process death.
+            if (!showForegroundNotification("Starting Always-on Maximus VPN...")) return START_NOT_STICKY
+            connectJob?.cancel()
+            connectJob = serviceScope.launch {
+                val profile = settingsRepository.getSettings().selectedProfileId
+                    ?.let { serverRepository.getProfileById(it) }
+                    ?: serverRepository.getAllProfilesOnce().firstOrNull()
+                if (profile != null) {
+                    connect(profile)
+                } else {
+                    updateState(_vpnState.value.copy(
+                        status = ConnectionStatus.FAILED,
+                        errorMessage = "Always-on VPN has no selected server profile."
+                    ))
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+            }
+            return START_STICKY
+        }
+        val profileId = intent?.getStringExtra(EXTRA_PROFILE_ID)
 
         when (action) {
             ACTION_CONNECT -> {
@@ -221,7 +242,7 @@ class RayVpnService : VpnService() {
             }
         }
 
-        return START_NOT_STICKY
+        return if (action == ACTION_CONNECT || action == ACTION_RECONNECT) START_STICKY else START_NOT_STICKY
     }
 
     private suspend fun connect(profile: VlessProfile): Unit = connectionMutex.withLock {
@@ -319,13 +340,16 @@ class RayVpnService : VpnService() {
                 } catch (_: Exception) {}
             }
 
-            if (settings.ipv6Enabled) {
+            val kotlinPacketTunnel = com.example.vpn.engine.EngineSelectionPolicy.usesKotlinPacketTunnel(profile)
+            if (settings.ipv6Enabled && !kotlinPacketTunnel) {
                 try {
                     builder.addAddress("fdfe:dcba:9876::1", 126)
                     builder.addRoute("::", 0)
                 } catch (e: Exception) {
                     XrayLogManager.w("VPN", "IPv6 address configuration skipped: ${e.message}")
                 }
+            } else if (settings.ipv6Enabled) {
+                XrayLogManager.i("VPN", "IPv6 traffic blocked: Kotlin compatibility packet loop currently supports IPv4 only.")
             }
 
             XrayLogManager.i("VPN", "[DIAGNOSTICS] 4. Builder.establish() invoked (MTU=$safeMtu, Address=172.19.0.1/30, DNS=$primaryDns).")
