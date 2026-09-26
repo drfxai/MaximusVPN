@@ -465,16 +465,16 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(14.dp)) {
                 SettingToggleItem(
                     icon = Icons.Default.Lock,
-                    title = "In-Tunnel Kill Switch",
-                    subtitle = "Blocks while the TUN is active; enable Android Always-on VPN lockdown for OS enforcement",
+                    title = "In-Tunnel Packet Guard",
+                    subtitle = "For system-wide blocking during disconnects, enable Android Always-on VPN and Block connections without VPN",
                     checked = settings.killSwitchEnabled,
                     onCheckedChange = { viewModel.setKillSwitch(it) }
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 SettingToggleItem(
                     icon = Icons.Default.Route,
-                    title = "Block IPv6 Leaks",
-                    subtitle = "Captures and blocks IPv6 because this tunnel currently forwards IPv4 only",
+                    title = "Route IPv6 through VPN",
+                    subtitle = "Native Xray routes IPv6 when enabled; IPv6 is blocked on the IPv4-only Kotlin compatibility tunnel",
                     checked = settings.ipv6Enabled,
                     onCheckedChange = { viewModel.setIpv6(it) }
                 )
