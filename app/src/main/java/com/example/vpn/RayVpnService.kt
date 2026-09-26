@@ -30,6 +30,7 @@ import com.example.data.model.VlessProfile
 import com.example.data.repository.ServerRepository
 import com.example.data.repository.SettingsRepository
 import com.example.vpn.engine.MihomoEngine
+import com.example.vpn.engine.EngineSelectionPolicy
 import com.example.vpn.engine.VpnEngine
 import com.example.vpn.engine.NativeTunVpnEngine
 import com.example.xray.XrayConfigBuilder
@@ -381,7 +382,9 @@ class RayVpnService : VpnService() {
             showForegroundNotification("Android VPN Active (Establishing Proxy...)")
 
             // 7. Diagnostic step 7: Select and start active engine
-            activeEngine = when (settings.preferredEngine) {
+            activeEngine = if (EngineSelectionPolicy.requiresKotlinTunnel(profile)) {
+                com.example.vpn.engine.KotlinTunnelEngine.instance
+            } else when (settings.preferredEngine) {
                 EngineType.MIHOMO -> {
                     if (profile.protocolType == ProtocolType.HTTP || profile.protocolType == ProtocolType.SOCKS5) {
                         com.example.vpn.engine.KotlinTunnelEngine.instance
