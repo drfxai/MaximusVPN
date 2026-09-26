@@ -29,6 +29,12 @@ object RoutingEngine {
             return RoutingDecision.BLOCK
         }
 
+        // Never let classic DNS escape directly, even when a LAN or user bypass rule matches.
+        // If the proxy cannot carry it, fail closed instead of exposing the device's source IP.
+        if ((protocol == IpProtocol.UDP || protocol == IpProtocol.TCP) && dstPort == 53) {
+            return if (isTunnelConnected) RoutingDecision.PROXY else RoutingDecision.BLOCK
+        }
+
         val isLan = isLanAddress(dstIp)
 
         // Block private/loopback/multicast traffic if kill switch is active and not on LAN bypass
