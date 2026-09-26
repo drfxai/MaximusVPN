@@ -2,6 +2,10 @@
 
 Native Android VPN application. The installable APK is published under [GitHub Releases](https://github.com/drfxai/MaximusVPN/releases) after a signed release build succeeds. Do not install an APK from an untrusted mirror.
 
+## v1.0.8
+
+Plain VLESS over TCP now uses the Kotlin tunnel compatibility path, avoiding the Xray-core startup rejection for unencrypted VLESS profiles. TLS and REALITY VLESS profiles continue to use the native Xray core.
+
 ## Install
 
 1. Open the latest release and download `arm64-v8a.apk` for an ARM64 Android device, or `app-release.apk` for another supported device. Download `SHA256SUMS` too.
