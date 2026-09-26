@@ -546,7 +546,7 @@ fun ConnectionButton(
 
                 Text(
                     text = when (status) {
-                        ConnectionStatus.CONNECTED -> "PROTECTED"
+                        ConnectionStatus.CONNECTED -> "CONNECTED"
                         ConnectionStatus.CONNECTING -> "CONNECTING"
                         ConnectionStatus.VPN_INTERFACE_ESTABLISHED -> "TUNNEL ON"
                         ConnectionStatus.PROXY_CONNECTING -> "HANDSHAKE"
