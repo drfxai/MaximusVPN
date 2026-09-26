@@ -7,7 +7,6 @@ import com.example.vpn.packet.IPv4Header
 import com.example.vpn.packet.IpProtocol
 import com.example.vpn.packet.TcpHeader
 import com.example.vpn.packet.UdpHeader
-import com.example.vpn.tunnel.DnsRelay
 import com.example.vpn.tunnel.IcmpHandler
 import com.example.vpn.tunnel.TcpVlessTunnel
 import com.example.vpn.tunnel.UdpRelay
@@ -47,7 +46,6 @@ class TunnelManager(
     private val outputLock = Any()
     private val consecutiveWriteErrors = AtomicInteger(0)
 
-    private var dnsRelay: DnsRelay? = null
     private var icmpHandler: IcmpHandler? = null
     private var tcpTunnel: TcpVlessTunnel? = null
     private var udpRelay: UdpRelay? = null
@@ -88,16 +86,6 @@ class TunnelManager(
             }
         }
 
-        dnsRelay = DnsRelay(
-            scope = scope,
-            defaultDnsServer = if (settings.dnsServer.isNotBlank()) settings.dnsServer else "https://8.8.8.8/dns-query",
-            fallbackDnsServer = if (settings.customDns.isNotBlank()) settings.customDns else "8.8.8.8",
-            protectSocket = protectSocket,
-            protectDatagram = protectDatagram,
-            sendToTun = sendToTunFunc,
-            onTraffic = onTraffic
-        )
-
         icmpHandler = IcmpHandler(
             sendToTun = sendToTunFunc,
             onTraffic = onTraffic
@@ -124,7 +112,7 @@ class TunnelManager(
             onTunnelError = onTunnelError
         )
 
-        XrayLogManager.appendLog("TUN transparent router active: DNS, ICMP, and TCP/UDP VLESS bridges initialized.", "TUNNEL")
+        XrayLogManager.appendLog("TUN router active: DNS/UDP, ICMP, and TCP/UDP forwarding use the selected proxy route.", "TUNNEL")
 
         tunnelJob = scope.launch(Dispatchers.IO) {
             val buffer = ByteArray(settings.mtu + 500)
@@ -173,11 +161,8 @@ class TunnelManager(
             IpProtocol.UDP -> {
                 val ipHeaderLen = ipHeader.ihl * 4
                 val udpHeader = UdpHeader.parse(buffer, ipHeaderLen, ipHeader.totalLength) ?: return
-                if (udpHeader.dstPort == 53) {
-                    dnsRelay?.handleDnsPacket(ipHeader, udpHeader, buffer)
-                } else {
-                    udpRelay?.handleUdpPacket(ipHeader, udpHeader, buffer)
-                }
+                // RoutingEngine forces DNS through the proxy path and blocks it if unavailable.
+                udpRelay?.handleUdpPacket(ipHeader, udpHeader, buffer)
             }
             IpProtocol.TCP -> {
                 val ipHeaderLen = ipHeader.ihl * 4
